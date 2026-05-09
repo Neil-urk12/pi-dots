@@ -60,6 +60,63 @@ Force git refresh:
 /footer refresh
 ```
 
+Show active config paths and resolved config:
+
+```text
+/footer config
+```
+
+Reload config after editing JSON:
+
+```text
+/footer reload
+```
+
+## Configuration
+
+Config is optional. Defaults match the built-in package behavior.
+
+Load order:
+
+1. Global: `~/.pi/agent/clean-footer.json`
+2. Project: `.pi/clean-footer.json`
+
+Project config overrides global config. Nested `modelAliases` and `colors` are merged.
+
+Example:
+
+```json
+{
+  "enabled": true,
+  "showGit": true,
+  "showTokens": true,
+  "showCache": false,
+  "showContext": true,
+  "showDirectory": true,
+  "showEffort": true,
+  "gitRefreshDebounceMs": 500,
+  "contextWarningPercent": 70,
+  "contextDangerPercent": 85,
+  "modelAliases": {
+    "claude-sonnet-4-5-20250929": "sonnet-4.5",
+    "gpt-5.5-codex": "gpt-5.5"
+  },
+  "colors": {
+    "model": "accent",
+    "directory": "dim",
+    "git": "success",
+    "gitDirty": "warning",
+    "contextNormal": "success",
+    "contextWarning": "warning",
+    "contextDanger": "error",
+    "tokens": "muted",
+    "separator": "dim"
+  }
+}
+```
+
+Malformed JSON keeps defaults/last loaded behavior and reports an error through `/footer config` or at startup.
+
 ## Package manifest
 
 This package declares its extension through `package.json`:

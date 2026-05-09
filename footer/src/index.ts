@@ -5,13 +5,49 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const GIT_REFRESH_DEBOUNCE_MS = 500;
+const DEFAULT_GIT_REFRESH_DEBOUNCE_MS = 500;
 
 type Theme = ExtensionContext["ui"]["theme"];
+
+type CleanFooterConfig = {
+	enabled?: boolean;
+	showGit?: boolean;
+	showTokens?: boolean;
+	showCache?: boolean;
+	showContext?: boolean;
+	showDirectory?: boolean;
+	showEffort?: boolean;
+	gitRefreshDebounceMs?: number;
+	contextWarningPercent?: number;
+	contextDangerPercent?: number;
+	modelAliases?: Record<string, string>;
+	colors?: Partial<ColorConfig>;
+};
+
+type ResolvedConfig = Required<
+	Omit<CleanFooterConfig, "modelAliases" | "colors">
+> & {
+	modelAliases: Record<string, string>;
+	colors: ColorConfig;
+};
+
+type ColorConfig = {
+	model: string;
+	directory: string;
+	git: string;
+	gitDirty: string;
+	contextNormal: string;
+	contextWarning: string;
+	contextDanger: string;
+	tokens: string;
+	separator: string;
+};
 
 type GitState = {
 	inRepo: boolean;
@@ -32,16 +68,51 @@ type FooterRuntime = {
 	thinkingLevel?: string;
 	refreshTimer?: ReturnType<typeof setTimeout>;
 	requestRender?: () => void;
+	config: ResolvedConfig;
+	configPaths: { global: string; project: string };
+	loadedConfigPaths: string[];
+	configError?: string;
+};
+
+const defaultConfig: ResolvedConfig = {
+	enabled: true,
+	showGit: true,
+	showTokens: true,
+	showCache: true,
+	showContext: true,
+	showDirectory: true,
+	showEffort: true,
+	gitRefreshDebounceMs: DEFAULT_GIT_REFRESH_DEBOUNCE_MS,
+	contextWarningPercent: 70,
+	contextDangerPercent: 85,
+	modelAliases: {},
+	colors: {
+		model: "accent",
+		directory: "dim",
+		git: "success",
+		gitDirty: "warning",
+		contextNormal: "success",
+		contextWarning: "warning",
+		contextDanger: "error",
+		tokens: "muted",
+		separator: "dim",
+	},
 };
 
 const runtime: FooterRuntime = {
 	enabled: true,
 	git: { inRepo: false, dirtyCount: 0 },
+	config: defaultConfig,
+	configPaths: {
+		global: path.join(os.homedir(), ".pi", "agent", "clean-footer.json"),
+		project: path.join(process.cwd(), ".pi", "clean-footer.json"),
+	},
+	loadedConfigPaths: [],
 };
 
 export default function (pi: ExtensionAPI) {
 	pi.registerCommand("footer", {
-		description: "Toggle or refresh the clean footer",
+		description: "Toggle, refresh, or configure the clean footer",
 		handler: async (args, ctx) => {
 			const command = args.trim();
 
@@ -49,6 +120,21 @@ export default function (pi: ExtensionAPI) {
 				await refreshGit(ctx, true);
 				runtime.requestRender?.();
 				if (ctx.hasUI) ctx.ui.notify("Footer refreshed", "info");
+				return;
+			}
+
+			if (command === "reload") {
+				loadConfig(ctx.cwd);
+				runtime.enabled = runtime.config.enabled;
+				if (ctx.hasUI && runtime.enabled) installFooter(ctx);
+				if (ctx.hasUI && !runtime.enabled) ctx.ui.setFooter(undefined);
+				runtime.requestRender?.();
+				notifyConfigStatus(ctx);
+				return;
+			}
+
+			if (command === "config") {
+				showConfig(ctx);
 				return;
 			}
 
@@ -69,10 +155,13 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
+		loadConfig(ctx.cwd);
+		runtime.enabled = runtime.config.enabled;
 		runtime.thinkingLevel = normalizeThinkingLevel(pi.getThinkingLevel?.());
 		if (!ctx.hasUI || !runtime.enabled) return;
 		installFooter(ctx);
 		await refreshGit(ctx, true);
+		if (runtime.configError) notifyConfigStatus(ctx);
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
@@ -114,12 +203,17 @@ function installFooter(ctx: ExtensionContext) {
 		return {
 			invalidate() {},
 			render(width: number): string[] {
+				const cfg = runtime.config;
 				const modelSegment = formatModelSegment(ctx, theme);
-				const dirSegment = theme.fg("dim", path.basename(ctx.cwd));
-				const gitSegment = formatGitSegment(theme);
-				const ctxSegment = formatContextSegment(ctx, theme);
+				const dirSegment = cfg.showDirectory
+					? color(theme, cfg.colors.directory, path.basename(ctx.cwd))
+					: undefined;
+				const gitSegment = cfg.showGit ? formatGitSegment(theme) : undefined;
+				const ctxSegment = cfg.showContext
+					? formatContextSegment(ctx, theme)
+					: undefined;
 				const totals = getTotals(ctx);
-				const separator = theme.fg("dim", " | ");
+				const separator = color(theme, cfg.colors.separator, " | ");
 
 				const leftFull = [modelSegment, dirSegment, gitSegment]
 					.filter(Boolean)
@@ -130,10 +224,11 @@ function installFooter(ctx: ExtensionContext) {
 					return [
 						joinLeftRight(
 							leftFull,
-							[
+							joinRightSegments(
+								theme,
 								ctxSegment,
-								theme.fg("muted", formatTokenSegment(totals, "full")),
-							].join(separator),
+								tokenSegment(theme, totals, "full"),
+							),
 							width,
 						),
 					];
@@ -143,10 +238,11 @@ function installFooter(ctx: ExtensionContext) {
 					return [
 						joinLeftRight(
 							leftFull,
-							[
+							joinRightSegments(
+								theme,
 								ctxSegment,
-								theme.fg("muted", formatTokenSegment(totals, "no-cache")),
-							].join(separator),
+								tokenSegment(theme, totals, "no-cache"),
+							),
 							width,
 						),
 					];
@@ -156,31 +252,154 @@ function installFooter(ctx: ExtensionContext) {
 					return [
 						joinLeftRight(
 							leftFull,
-							[
+							joinRightSegments(
+								theme,
 								ctxSegment,
-								theme.fg("muted", formatTokenSegment(totals, "total-only")),
-							].join(separator),
+								tokenSegment(theme, totals, "total-only"),
+							),
 							width,
 						),
 					];
 				}
 
-				if (width >= 40) return [joinLeftRight(leftFull, ctxSegment, width)];
-				return [joinLeftRight(leftMin, ctxSegment, width)];
+				if (width >= 40)
+					return [joinLeftRight(leftFull, ctxSegment ?? "", width)];
+				return [joinLeftRight(leftMin, ctxSegment ?? "", width)];
 			},
 		};
 	});
 }
 
+function loadConfig(cwd: string) {
+	const configPaths = {
+		global: path.join(os.homedir(), ".pi", "agent", "clean-footer.json"),
+		project: path.join(cwd, ".pi", "clean-footer.json"),
+	};
+
+	const loaded: string[] = [];
+	let merged: CleanFooterConfig = {};
+	let error: string | undefined;
+
+	for (const configPath of [configPaths.global, configPaths.project]) {
+		if (!existsSync(configPath)) continue;
+		try {
+			const parsed = JSON.parse(
+				readFileSync(configPath, "utf8"),
+			) as CleanFooterConfig;
+			merged = mergeConfig(merged, parsed);
+			loaded.push(configPath);
+		} catch (err) {
+			error = `${configPath}: ${err instanceof Error ? err.message : String(err)}`;
+		}
+	}
+
+	runtime.configPaths = configPaths;
+	runtime.loadedConfigPaths = loaded;
+	runtime.configError = error;
+	runtime.config = resolveConfig(merged);
+}
+
+function mergeConfig(
+	base: CleanFooterConfig,
+	override: CleanFooterConfig,
+): CleanFooterConfig {
+	return {
+		...base,
+		...override,
+		modelAliases: {
+			...(base.modelAliases ?? {}),
+			...(override.modelAliases ?? {}),
+		},
+		colors: {
+			...(base.colors ?? {}),
+			...(override.colors ?? {}),
+		},
+	};
+}
+
+function resolveConfig(config: CleanFooterConfig): ResolvedConfig {
+	return {
+		...defaultConfig,
+		...config,
+		gitRefreshDebounceMs: positiveNumber(
+			config.gitRefreshDebounceMs,
+			defaultConfig.gitRefreshDebounceMs,
+		),
+		contextWarningPercent: percentNumber(
+			config.contextWarningPercent,
+			defaultConfig.contextWarningPercent,
+		),
+		contextDangerPercent: percentNumber(
+			config.contextDangerPercent,
+			defaultConfig.contextDangerPercent,
+		),
+		modelAliases: {
+			...defaultConfig.modelAliases,
+			...(config.modelAliases ?? {}),
+		},
+		colors: { ...defaultConfig.colors, ...(config.colors ?? {}) },
+	};
+}
+
+function positiveNumber(value: unknown, fallback: number): number {
+	return typeof value === "number" && Number.isFinite(value) && value > 0
+		? value
+		: fallback;
+}
+
+function percentNumber(value: unknown, fallback: number): number {
+	return typeof value === "number" &&
+		Number.isFinite(value) &&
+		value >= 0 &&
+		value <= 100
+		? value
+		: fallback;
+}
+
+function notifyConfigStatus(ctx: ExtensionContext) {
+	if (!ctx.hasUI) return;
+	if (runtime.configError) {
+		ctx.ui.notify(`Clean footer config error: ${runtime.configError}`, "error");
+		return;
+	}
+	ctx.ui.notify("Clean footer config loaded", "info");
+}
+
+function showConfig(ctx: ExtensionContext) {
+	if (!ctx.hasUI) return;
+	const loaded = runtime.loadedConfigPaths.length
+		? runtime.loadedConfigPaths.join("\n")
+		: "none";
+	ctx.ui.notify(
+		[
+			"Clean footer config",
+			`global: ${runtime.configPaths.global}`,
+			`project: ${runtime.configPaths.project}`,
+			`loaded:\n${loaded}`,
+			runtime.configError ? `error: ${runtime.configError}` : "error: none",
+			`resolved: ${JSON.stringify(runtime.config)}`,
+		].join("\n"),
+		"info",
+	);
+}
+
 function formatModelSegment(ctx: ExtensionContext, theme: Theme): string {
-	const model = formatModelName(ctx.model?.id ?? "no-model");
-	const effort = runtime.thinkingLevel ? ` • ${runtime.thinkingLevel}` : "";
-	return theme.fg("accent", `${model}${effort}`);
+	const modelId = ctx.model?.id ?? "no-model";
+	const model = formatModelName(modelId);
+	const effort =
+		runtime.config.showEffort && runtime.thinkingLevel
+			? ` • ${runtime.thinkingLevel}`
+			: "";
+	return color(theme, runtime.config.colors.model, `${model}${effort}`);
 }
 
 function formatModelName(modelId: string): string {
+	const aliases = runtime.config.modelAliases;
+	if (aliases[modelId]) return aliases[modelId];
+
 	const lower = modelId.toLowerCase();
 	const withoutProvider = lower.includes("/") ? lower.split("/").pop()! : lower;
+	if (aliases[withoutProvider]) return aliases[withoutProvider];
 
 	if (
 		withoutProvider.includes("claude") &&
@@ -244,6 +463,24 @@ function getTotals(ctx: ExtensionContext): Totals {
 	return totals;
 }
 
+function tokenSegment(
+	theme: Theme,
+	totals: Totals,
+	mode: "full" | "no-cache" | "total-only",
+): string | undefined {
+	if (!runtime.config.showTokens) return undefined;
+	const effectiveMode = runtime.config.showCache
+		? mode
+		: mode === "full"
+			? "no-cache"
+			: mode;
+	return color(
+		theme,
+		runtime.config.colors.tokens,
+		formatTokenSegment(totals, effectiveMode),
+	);
+}
+
 function formatTokenSegment(
 	totals: Totals,
 	mode: "full" | "no-cache" | "total-only",
@@ -263,24 +500,31 @@ function formatContextSegment(ctx: ExtensionContext, theme: Theme): string {
 	const max = ctx.model?.contextWindow;
 	const text = `ctx ${formatCount(used)}/${max ? formatCount(max) : "--"}`;
 
-	if (!max || max <= 0) return theme.fg("dim", text);
+	if (!max || max <= 0) return color(theme, "dim", text);
 
-	const ratio = used / max;
-	if (ratio >= 0.85) return theme.fg("error", text);
-	if (ratio >= 0.7) return theme.fg("warning", text);
-	return theme.fg("success", text);
+	const percent = (used / max) * 100;
+	if (percent >= runtime.config.contextDangerPercent)
+		return color(theme, runtime.config.colors.contextDanger, text);
+	if (percent >= runtime.config.contextWarningPercent)
+		return color(theme, runtime.config.colors.contextWarning, text);
+	return color(theme, runtime.config.colors.contextNormal, text);
 }
 
 function formatGitSegment(theme: Theme): string | undefined {
 	if (!runtime.git.inRepo || !runtime.git.branch) return undefined;
 
-	const branch = theme.fg("success", runtime.git.branch);
+	const branch = color(theme, runtime.config.colors.git, runtime.git.branch);
 	if (runtime.git.dirtyCount <= 0) return branch;
 
-	return `${branch} ${theme.fg("warning", `●${runtime.git.dirtyCount}`)}`;
+	return `${branch} ${color(theme, runtime.config.colors.gitDirty, `●${runtime.git.dirtyCount}`)}`;
 }
 
 async function refreshGit(ctx: ExtensionContext, immediate = false) {
+	if (!runtime.config.showGit) {
+		runtime.git = { inRepo: false, dirtyCount: 0 };
+		return;
+	}
+
 	try {
 		const [branchResult, statusResult] = await Promise.all([
 			execFileAsync("git", ["branch", "--show-current"], {
@@ -308,12 +552,21 @@ function scheduleGitRefresh(ctx: ExtensionContext) {
 	runtime.refreshTimer = setTimeout(() => {
 		runtime.refreshTimer = undefined;
 		void refreshGit(ctx, true);
-	}, GIT_REFRESH_DEBOUNCE_MS);
+	}, runtime.config.gitRefreshDebounceMs);
 }
 
 function clearScheduledRefresh() {
 	if (runtime.refreshTimer) clearTimeout(runtime.refreshTimer);
 	runtime.refreshTimer = undefined;
+}
+
+function joinRightSegments(
+	theme: Theme,
+	...segments: Array<string | undefined>
+): string {
+	return segments
+		.filter(Boolean)
+		.join(color(theme, runtime.config.colors.separator, " | "));
 }
 
 function joinLeftRight(left: string, right: string, width: number): string {
@@ -327,6 +580,10 @@ function joinLeftRight(left: string, right: string, width: number): string {
 	return (
 		truncateToWidth(left, half) + " " + truncateToWidth(right, width - half - 1)
 	);
+}
+
+function color(theme: Theme, colorName: string, text: string): string {
+	return theme.fg(colorName as never, text);
 }
 
 function formatCount(value: number): string {
