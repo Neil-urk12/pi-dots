@@ -1,7 +1,7 @@
 /**
  * Minimal subagents extension.
  *
- * Registers a single `subagent` tool with three agents: scout, researcher, worker.
+ * Registers a single `subagent` tool with three agents: blitz, seeker, grind.
  * Supports single and parallel execution. Output is verbal only (no file handoff).
  */
 import { spawn } from "node:child_process";
@@ -660,6 +660,55 @@ export default function (pi: ExtensionAPI) {
 	const config = loadConfig();
 	const maxConcurrency = config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
 	agents = loadAgents(config);
+
+	async function runAgentCommand(agentName: string, task: string, ctx: ExtensionContext) {
+		if (!ctx.hasUI) return;
+
+		const agent = agents.find((a) => a.name === agentName);
+		if (!agent) {
+			ctx.ui.notify(`Agent "${agentName}" not found`, "error");
+			return;
+		}
+
+		ctx.ui.notify(`Running ${agentName}...`, "info");
+
+		const result = await runSubagent(agent, task, ctx.cwd, undefined);
+
+		if (result.exitCode !== 0 || result.progress.error) {
+			ctx.ui.notify(
+				`${agentName} failed: ${result.progress.error || `exit code ${result.exitCode}`}`,
+				"error",
+			);
+			return;
+		}
+
+		const truncated = result.output.length > 600
+			? result.output.slice(0, 600) + "\n\n[truncated]"
+			: result.output;
+
+		ctx.ui.notify(truncated, "info");
+	}
+
+	pi.registerCommand("blitz", {
+		description: "Fast codebase recon — explore files, find patterns, map architecture",
+		handler: async (args, ctx) => {
+			await runAgentCommand("blitz", args, ctx);
+		},
+	});
+
+	pi.registerCommand("seeker", {
+		description: "Web research — search the web and synthesize findings",
+		handler: async (args, ctx) => {
+			await runAgentCommand("seeker", args, ctx);
+		},
+	});
+
+	pi.registerCommand("grind", {
+		description: "Code changes — read, write, and edit files with safe bash",
+		handler: async (args, ctx) => {
+			await runAgentCommand("grind", args, ctx);
+		},
+	});
 
 	pi.registerTool({
 		name: "subagent",
