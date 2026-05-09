@@ -1,0 +1,23 @@
+{
+  "name": "pi-clean-footer",
+  "version": "0.1.0",
+  "description": "Clean adaptive footer extension for pi coding agent.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "footer",
+    "terminal"
+  ],
+  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./extensions/clean-footer.ts"
+    ]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  }
+}
