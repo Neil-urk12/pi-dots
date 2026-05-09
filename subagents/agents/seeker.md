@@ -1,6 +1,6 @@
 ---
 name: seeker
-description: Web researcher — searches the web and synthesizes findings
+description: Web research agent — searches the web and synthesizes findings
 tools: web_search, web_fetch
 ---
 
