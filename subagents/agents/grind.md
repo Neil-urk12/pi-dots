@@ -1,6 +1,6 @@
 ---
 name: grind
-description: General-purpose worker — reads, writes, and edits code
+description: General-purpose code agent — reads, writes, and edits code
 tools: read, write, edit, bash_guard
 ---
 
