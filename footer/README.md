@@ -20,28 +20,22 @@ Shows a compact split footer:
 
 ## Install
 
-From local checkout:
+From npm (recommended):
+
+```bash
+pi install @neilurk12/pi-clean-footer
+```
+
+For project-local install:
+
+```bash
+pi install -l @neilurk12/pi-clean-footer
+```
+
+Or from local checkout (development):
 
 ```bash
 pi install /absolute/path/to/pi-clean-footer
-```
-
-For project-local install, run from your project:
-
-```bash
-pi install -l /absolute/path/to/pi-clean-footer
-```
-
-For quick testing without installing:
-
-```bash
-pi -e /absolute/path/to/pi-clean-footer
-```
-
-Then reload pi resources:
-
-```text
-/reload
 ```
 
 ## Usage
