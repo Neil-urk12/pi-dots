@@ -12,7 +12,7 @@
   "license": "MIT",
   "pi": {
     "extensions": [
-      "./extensions/clean-footer.ts"
+      "./src/index.ts"
     ]
   },
   "peerDependencies": {
