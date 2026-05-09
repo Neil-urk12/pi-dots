@@ -670,9 +670,34 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		ctx.ui.notify(`Running ${agentName}...`, "info");
+		const colors = ["accent", "success", "warning", "error", "toolTitle", "muted"];
+		const color = colors[Math.floor(Math.random() * colors.length)];
+		const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+		let spinnerIdx = 0;
+		let latestProgress: AgentProgress | null = null;
+		const startTime = Date.now();
 
-		const result = await runSubagent(agent, task, ctx.cwd, undefined);
+		const renderStatus = () => {
+			const progress = latestProgress;
+			const frame = spinnerFrames[spinnerIdx++ % spinnerFrames.length];
+			const elapsed = formatDuration(progress?.durationMs ?? (Date.now() - startTime));
+			const toolPart = progress?.currentTool
+				? `${progress?.toolCount ?? 0} tools · ${progress.currentTool}`
+				: `${progress?.toolCount ?? 0} tools`;
+			const parts = [`${frame} ${agentName}`, toolPart];
+			if (progress && progress.tokens > 0) parts.push(`${formatTokens(progress.tokens)} tok`);
+			parts.push(elapsed);
+			ctx.ui.notify(ctx.ui.theme.fg(color, parts.join(" · ")), "info");
+		};
+
+		renderStatus();
+		const interval = setInterval(renderStatus, 80);
+
+		const result = await runSubagent(agent, task, ctx.cwd, undefined, (progress) => {
+			latestProgress = progress;
+		});
+
+		clearInterval(interval);
 
 		if (result.exitCode !== 0 || result.progress.error) {
 			pi.sendMessage(
