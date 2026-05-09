@@ -4,9 +4,7 @@ Clean adaptive footer extension for [pi](https://pi.dev).
 
 Shows a compact split footer:
 
-```text
-model • effort | dir | branch ●N          ctx used/max | ↑input ↓output Σtotal ↯cacheRead ↥cacheWrite
-```
+![pi-clean-footer example](./example.png)
 
 ## Features
 
