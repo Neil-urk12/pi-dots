@@ -8,9 +8,25 @@ import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
-import { getMarkdownTheme, parseFrontmatter, truncateHead, withFileMutationQueue, DEFAULT_MAX_BYTES, DEFAULT_MAX_LINES } from "@mariozechner/pi-coding-agent";
-import { Container, Markdown, Spacer, Text, visibleWidth } from "@mariozechner/pi-tui";
+import type {
+	ExtensionAPI,
+	ExtensionContext,
+} from "@mariozechner/pi-coding-agent";
+import {
+	getMarkdownTheme,
+	parseFrontmatter,
+	truncateHead,
+	withFileMutationQueue,
+	DEFAULT_MAX_BYTES,
+	DEFAULT_MAX_LINES,
+} from "@mariozechner/pi-coding-agent";
+import {
+	Container,
+	Markdown,
+	Spacer,
+	Text,
+	visibleWidth,
+} from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 
 // ── Types ──────────────────────────────────────────────────────────────
@@ -50,7 +66,14 @@ interface AgentResult {
 	exitCode: number;
 	progress: AgentProgress;
 	model?: string;
-	usage: { input: number; output: number; cacheRead: number; cacheWrite: number; cost: number; turns: number };
+	usage: {
+		input: number;
+		output: number;
+		cacheRead: number;
+		cacheWrite: number;
+		cost: number;
+		turns: number;
+	};
 }
 
 interface Details {
@@ -81,15 +104,24 @@ function loadConfig(): ExtensionConfig {
 	// Load from extension directory
 	try {
 		if (fs.existsSync(CONFIG_PATH)) {
-			return JSON.parse(fs.readFileSync(CONFIG_PATH, "utf-8")) as ExtensionConfig;
+			return JSON.parse(
+				fs.readFileSync(CONFIG_PATH, "utf-8"),
+			) as ExtensionConfig;
 		}
 	} catch {}
 
 	// Fallback: check ~/.pi/agent/subagents.json
-	const userConfigPath = path.join(os.homedir(), ".pi", "agent", "subagents.json");
+	const userConfigPath = path.join(
+		os.homedir(),
+		".pi",
+		"agent",
+		"subagents.json",
+	);
 	try {
 		if (fs.existsSync(userConfigPath)) {
-			return JSON.parse(fs.readFileSync(userConfigPath, "utf-8")) as ExtensionConfig;
+			return JSON.parse(
+				fs.readFileSync(userConfigPath, "utf-8"),
+			) as ExtensionConfig;
 		}
 	} catch {}
 
@@ -97,10 +129,23 @@ function loadConfig(): ExtensionConfig {
 }
 
 // Built-in tools that pi provides natively (no extension needed)
-const BUILTIN_TOOLS = new Set(["read", "write", "edit", "bash", "grep", "find", "ls"]);
+const BUILTIN_TOOLS = new Set([
+	"read",
+	"write",
+	"edit",
+	"bash",
+	"grep",
+	"find",
+	"ls",
+]);
 
 // Custom tools that require loading an extension into the subagent process
-const EXT_BASE = path.join(process.env.HOME || "~", ".pi", "agent", "extensions");
+const EXT_BASE = path.join(
+	process.env.HOME || "~",
+	".pi",
+	"agent",
+	"extensions",
+);
 const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
 	web_search: path.join(EXT_BASE, "web-search", "index.ts"),
 	web_fetch: path.join(EXT_BASE, "web-fetch", "index.ts"),
@@ -137,7 +182,8 @@ function loadAgents(config: ExtensionConfig): AgentConfig[] {
 		if (!entry.endsWith(".md")) continue;
 		const filePath = path.join(AGENTS_DIR, entry);
 		const content = fs.readFileSync(filePath, "utf-8");
-		const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
+		const { frontmatter, body } =
+			parseFrontmatter<Record<string, string>>(content);
 		if (!frontmatter.name) continue;
 		const tools = (frontmatter.tools || "")
 			.split(",")
@@ -147,7 +193,10 @@ function loadAgents(config: ExtensionConfig): AgentConfig[] {
 			name: frontmatter.name,
 			description: frontmatter.description || "",
 			tools,
-			model: frontmatter.model || modelDefaults[frontmatter.name] || "anthropic/claude-sonnet-4-6",
+			model:
+				frontmatter.model ||
+				modelDefaults[frontmatter.name] ||
+				"anthropic/claude-sonnet-4-6",
 			systemPrompt: body,
 			filePath,
 		});
@@ -174,7 +223,11 @@ function resolvePiBinary(): { command: string; baseArgs: string[] } {
 // ── Formatting Utilities ──────────────────────────────────────────────
 
 function formatTokens(n: number): string {
-	return n < 1000 ? String(n) : n < 10000 ? `${(n / 1000).toFixed(1)}k` : `${Math.round(n / 1000)}k`;
+	return n < 1000
+		? String(n)
+		: n < 10000
+			? `${(n / 1000).toFixed(1)}k`
+			: `${Math.round(n / 1000)}k`;
 }
 
 function formatDuration(ms: number): string {
@@ -183,7 +236,10 @@ function formatDuration(ms: number): string {
 	return `${Math.floor(ms / 60000)}m${Math.floor((ms % 60000) / 1000)}s`;
 }
 
-function formatToolPreview(name: string, args: Record<string, unknown>): string {
+function formatToolPreview(
+	name: string,
+	args: Record<string, unknown>,
+): string {
 	switch (name) {
 		case "bash":
 		case "bash_guard":
@@ -249,10 +305,20 @@ async function buildPiArgs(
 	// Write system prompt to temp file
 	const promptPath = path.join(tempDir, `${agent.name}.md`);
 	await withFileMutationQueue(promptPath, async () => {
-		await fs.promises.writeFile(promptPath, agent.systemPrompt, { encoding: "utf-8", mode: 0o600 });
+		await fs.promises.writeFile(promptPath, agent.systemPrompt, {
+			encoding: "utf-8",
+			mode: 0o600,
+		});
 	});
 
-	const args = [...piBin.baseArgs, "--mode", "json", "-p", "--no-session", "--no-skills"];
+	const args = [
+		...piBin.baseArgs,
+		"--mode",
+		"json",
+		"-p",
+		"--no-session",
+		"--no-skills",
+	];
 
 	// Separate builtin tools from custom tools
 	const builtinTools: string[] = [];
@@ -280,7 +346,7 @@ async function buildPiArgs(
 		args.push("--extension", extPath);
 	}
 
-	args.push("--models", agent.model);
+	args.push("--model", agent.model);
 	args.push("--append-system-prompt", promptPath);
 
 	// Handle long tasks by writing to file
@@ -288,7 +354,10 @@ async function buildPiArgs(
 	if (task.length > TASK_LIMIT) {
 		const taskPath = path.join(tempDir, "task.md");
 		await withFileMutationQueue(taskPath, async () => {
-			await fs.promises.writeFile(taskPath, `Task: ${task}`, { encoding: "utf-8", mode: 0o600 });
+			await fs.promises.writeFile(taskPath, `Task: ${task}`, {
+				encoding: "utf-8",
+				mode: 0o600,
+			});
 		});
 		args.push(`@${taskPath}`);
 	} else {
@@ -337,7 +406,14 @@ async function runSubagent(
 		output: "",
 		exitCode: 0,
 		model: agent.model,
-		usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			cost: 0,
+			turns: 0,
+		},
 		progress: {
 			agent: agent.name,
 			status: "running",
@@ -376,7 +452,9 @@ async function runSubagent(
 				if (evt.type === "tool_execution_start") {
 					progress.toolCount++;
 					progress.currentTool = evt.toolName;
-					progress.currentToolArgs = extractToolArgsPreview((evt.args || {}) as Record<string, unknown>);
+					progress.currentToolArgs = extractToolArgsPreview(
+						(evt.args || {}) as Record<string, unknown>,
+					);
 					fireUpdate();
 				}
 
@@ -413,7 +491,8 @@ async function runSubagent(
 							progress.tokens = result.usage.input + result.usage.output;
 						}
 						if (evt.message.model) result.model = evt.message.model;
-						if (evt.message.errorMessage) progress.error = evt.message.errorMessage;
+						if (evt.message.errorMessage)
+							progress.error = evt.message.errorMessage;
 
 						const text = extractTextFromContent(evt.message.content);
 						if (text) {
@@ -482,11 +561,15 @@ async function runSubagent(
 	result.exitCode = exitCode;
 	progress.status = exitCode === 0 && !progress.error ? "completed" : "failed";
 	progress.durationMs = Date.now() - startTime;
-	if (progress.error) result.output = result.output || `Error: ${progress.error}`;
+	if (progress.error)
+		result.output = result.output || `Error: ${progress.error}`;
 
 	// Truncate output if very large
 	if (result.output.length > DEFAULT_MAX_BYTES) {
-		const trunc = truncateHead(result.output, { maxLines: DEFAULT_MAX_LINES, maxBytes: DEFAULT_MAX_BYTES });
+		const trunc = truncateHead(result.output, {
+			maxLines: DEFAULT_MAX_LINES,
+			maxBytes: DEFAULT_MAX_BYTES,
+		});
 		result.output = trunc.content;
 		if (trunc.truncated) {
 			result.output += "\n\n[Output truncated]";
@@ -506,7 +589,10 @@ function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
 		const remaining = ms - (now - lastCall);
 		if (remaining <= 0) {
 			lastCall = now;
-			if (timer) { clearTimeout(timer); timer = undefined; }
+			if (timer) {
+				clearTimeout(timer);
+				timer = undefined;
+			}
 			fn(...args);
 		} else if (!timer) {
 			timer = setTimeout(() => {
@@ -535,7 +621,10 @@ async function mapConcurrent<T, R>(
 		}
 	}
 
-	const workers = Array.from({ length: Math.min(concurrency, items.length) }, () => worker());
+	const workers = Array.from(
+		{ length: Math.min(concurrency, items.length) },
+		() => worker(),
+	);
 	await Promise.all(workers);
 	return results;
 }
@@ -543,7 +632,8 @@ async function mapConcurrent<T, R>(
 // ── Rendering ─────────────────────────────────────────────────────────
 
 type Theme = ExtensionContext["ui"]["theme"];
-type Component = ReturnType<typeof Text.prototype.render> extends string[] ? Text : any;
+type Component =
+	ReturnType<typeof Text.prototype.render> extends string[] ? Text : any;
 
 function getTermWidth(): number {
 	return process.stdout.columns || 120;
@@ -572,8 +662,12 @@ function renderAgentProgress(
 	const modelStr = r.model ? theme.fg("dim", ` (${r.model})`) : "";
 	c.addChild(
 		new Text(
-			truncLine(`${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${modelStr} — ${theme.fg("dim", stats)}`, w),
-			0, 0,
+			truncLine(
+				`${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${modelStr} — ${theme.fg("dim", stats)}`,
+				w,
+			),
+			0,
+			0,
 		),
 	);
 
@@ -584,9 +678,7 @@ function renderAgentProgress(
 	} else {
 		// Truncate to one line
 		const flat = r.task.replace(/\n/g, " ");
-		c.addChild(
-			new Text(truncLine(theme.fg("dim", `Task: ${flat}`), w), 0, 0),
-		);
+		c.addChild(new Text(truncLine(theme.fg("dim", `Task: ${flat}`), w), 0, 0));
 	}
 
 	// Current tool (running state)
@@ -597,7 +689,9 @@ function renderAgentProgress(
 		if (expanded) {
 			c.addChild(new Text(theme.fg("warning", `▸ ${toolLine}`), 0, 0));
 		} else {
-			c.addChild(new Text(truncLine(theme.fg("warning", `▸ ${toolLine}`), w), 0, 0));
+			c.addChild(
+				new Text(truncLine(theme.fg("warning", `▸ ${toolLine}`), w), 0, 0),
+			);
 		}
 	}
 
@@ -618,7 +712,9 @@ function renderAgentProgress(
 		if (expanded) {
 			c.addChild(new Text(theme.fg("text", prog.lastMessage), 0, 0));
 		} else {
-			c.addChild(new Text(truncLine(theme.fg("text", prog.lastMessage), w), 0, 0));
+			c.addChild(
+				new Text(truncLine(theme.fg("text", prog.lastMessage), w), 0, 0),
+			);
 		}
 	}
 
@@ -632,11 +728,14 @@ function renderAgentProgress(
 	// Usage breakdown
 	c.addChild(new Spacer(1));
 	const usageParts: string[] = [];
-	if (r.usage.turns) usageParts.push(`${r.usage.turns} turn${r.usage.turns > 1 ? "s" : ""}`);
+	if (r.usage.turns)
+		usageParts.push(`${r.usage.turns} turn${r.usage.turns > 1 ? "s" : ""}`);
 	if (r.usage.input) usageParts.push(`in:${formatTokens(r.usage.input)}`);
 	if (r.usage.output) usageParts.push(`out:${formatTokens(r.usage.output)}`);
-	if (r.usage.cacheRead) usageParts.push(`cR:${formatTokens(r.usage.cacheRead)}`);
-	if (r.usage.cacheWrite) usageParts.push(`cW:${formatTokens(r.usage.cacheWrite)}`);
+	if (r.usage.cacheRead)
+		usageParts.push(`cR:${formatTokens(r.usage.cacheRead)}`);
+	if (r.usage.cacheWrite)
+		usageParts.push(`cW:${formatTokens(r.usage.cacheWrite)}`);
 	if (r.usage.cost) usageParts.push(`$${r.usage.cost.toFixed(4)}`);
 	if (usageParts.length) {
 		c.addChild(new Text(theme.fg("dim", usageParts.join(" · ")), 0, 0));
@@ -647,7 +746,9 @@ function renderAgentProgress(
 		if (expanded) {
 			c.addChild(new Text(theme.fg("error", `Error: ${prog.error}`), 0, 0));
 		} else {
-			c.addChild(new Text(truncLine(theme.fg("error", `Error: ${prog.error}`), w), 0, 0));
+			c.addChild(
+				new Text(truncLine(theme.fg("error", `Error: ${prog.error}`), w), 0, 0),
+			);
 		}
 	}
 
@@ -661,7 +762,11 @@ export default function (pi: ExtensionAPI) {
 	const maxConcurrency = config.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
 	agents = loadAgents(config);
 
-	async function runAgentCommand(agentName: string, task: string, ctx: ExtensionContext) {
+	async function runAgentCommand(
+		agentName: string,
+		task: string,
+		ctx: ExtensionContext,
+	) {
 		if (!ctx.hasUI) return;
 
 		const agent = agents.find((a) => a.name === agentName);
@@ -670,7 +775,14 @@ export default function (pi: ExtensionAPI) {
 			return;
 		}
 
-		const colors = ["accent", "success", "warning", "error", "toolTitle", "muted"];
+		const colors = [
+			"accent",
+			"success",
+			"warning",
+			"error",
+			"toolTitle",
+			"muted",
+		];
 		const color = colors[Math.floor(Math.random() * colors.length)];
 		const spinnerFrames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 		let spinnerIdx = 0;
@@ -680,12 +792,15 @@ export default function (pi: ExtensionAPI) {
 		const renderStatus = () => {
 			const progress = latestProgress;
 			const frame = spinnerFrames[spinnerIdx++ % spinnerFrames.length];
-			const elapsed = formatDuration(progress?.durationMs ?? (Date.now() - startTime));
+			const elapsed = formatDuration(
+				progress?.durationMs ?? Date.now() - startTime,
+			);
 			const toolPart = progress?.currentTool
 				? `${progress?.toolCount ?? 0} tools · ${progress.currentTool}`
 				: `${progress?.toolCount ?? 0} tools`;
 			const parts = [`${frame} ${agentName}`, toolPart];
-			if (progress && progress.tokens > 0) parts.push(`${formatTokens(progress.tokens)} tok`);
+			if (progress && progress.tokens > 0)
+				parts.push(`${formatTokens(progress.tokens)} tok`);
 			parts.push(elapsed);
 			ctx.ui.notify(ctx.ui.theme.fg(color, parts.join(" · ")), "info");
 		};
@@ -693,17 +808,31 @@ export default function (pi: ExtensionAPI) {
 		renderStatus();
 		const interval = setInterval(renderStatus, 80);
 
-		const result = await runSubagent(agent, task, ctx.cwd, undefined, (progress) => {
-			latestProgress = progress;
-		});
-
-		clearInterval(interval);
+		let result: AgentResult;
+		try {
+			result = await runSubagent(
+				agent,
+				task,
+				ctx.cwd,
+				undefined,
+				(progress) => {
+					latestProgress = progress;
+				},
+			);
+		} finally {
+			clearInterval(interval);
+		}
 
 		if (result.exitCode !== 0 || result.progress.error) {
 			pi.sendMessage(
 				{
 					customType: "subagent-error",
-					content: [{ type: "text", text: `${agentName} failed: ${result.progress.error || `exit code ${result.exitCode}`}` }],
+					content: [
+						{
+							type: "text",
+							text: `${agentName} failed: ${result.progress.error || `exit code ${result.exitCode}`}`,
+						},
+					],
 					display: true,
 				},
 				{ triggerTurn: true },
@@ -714,7 +843,9 @@ export default function (pi: ExtensionAPI) {
 		pi.sendMessage(
 			{
 				customType: "subagent-result",
-				content: [{ type: "text", text: `/${agentName} ${task}\n\n${result.output}` }],
+				content: [
+					{ type: "text", text: `/${agentName} ${task}\n\n${result.output}` },
+				],
 				display: true,
 			},
 			{ triggerTurn: true },
@@ -722,7 +853,8 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.registerCommand("blitz", {
-		description: "Fast codebase recon — explore files, find patterns, map architecture",
+		description:
+			"Fast codebase recon — explore files, find patterns, map architecture",
 		handler: async (args, ctx) => {
 			await runAgentCommand("blitz", args, ctx);
 		},
@@ -756,20 +888,32 @@ export default function (pi: ExtensionAPI) {
 		],
 		parameters: Type.Object({
 			agent: Type.Optional(
-				Type.String({ description: "Name of the agent to invoke (SINGLE mode)" }),
+				Type.String({
+					description: "Name of the agent to invoke (SINGLE mode)",
+				}),
 			),
-			task: Type.Optional(Type.String({ description: "Task description (SINGLE mode)" })),
+			task: Type.Optional(
+				Type.String({ description: "Task description (SINGLE mode)" }),
+			),
 			tasks: Type.Optional(
 				Type.Array(
 					Type.Object({
 						agent: Type.String({ description: "Name of the agent to invoke" }),
 						task: Type.String({ description: "Task description" }),
-						cwd: Type.Optional(Type.String({ description: "Working directory for the agent process" })),
+						cwd: Type.Optional(
+							Type.String({
+								description: "Working directory for the agent process",
+							}),
+						),
 					}),
 					{ description: "PARALLEL mode: array of {agent, task} objects" },
 				),
 			),
-			cwd: Type.Optional(Type.String({ description: "Working directory for the agent process (single mode)" })),
+			cwd: Type.Optional(
+				Type.String({
+					description: "Working directory for the agent process (single mode)",
+				}),
+			),
 		}),
 
 		async execute(toolCallId, params, signal, onUpdate, ctx) {
@@ -784,7 +928,9 @@ export default function (pi: ExtensionAPI) {
 				const available = agents.map((a) => a.name).join(", ") || "none";
 				for (const t of taskList) {
 					if (!agents.find((a) => a.name === t.agent)) {
-						throw new Error(`Unknown agent: ${t.agent}. Available agents: ${available}`);
+						throw new Error(
+							`Unknown agent: ${t.agent}. Available agents: ${available}`,
+						);
 					}
 				}
 
@@ -798,14 +944,32 @@ export default function (pi: ExtensionAPI) {
 						output: "",
 						exitCode: -1,
 						model: undefined,
-						usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
-						progress: { agent: taskList[i].agent, status: "pending" as any, task: taskList[i].task, recentTools: [], toolCount: 0, tokens: 0, durationMs: 0, lastMessage: "" },
+						usage: {
+							input: 0,
+							output: 0,
+							cacheRead: 0,
+							cacheWrite: 0,
+							cost: 0,
+							turns: 0,
+						},
+						progress: {
+							agent: taskList[i].agent,
+							status: "pending" as any,
+							task: taskList[i].task,
+							recentTools: [],
+							toolCount: 0,
+							tokens: 0,
+							durationMs: 0,
+							lastMessage: "",
+						},
 					};
 				}
 
 				const flushParallelUpdate = () => {
 					onUpdate?.({
-						content: [{ type: "text", text: `Running ${taskList.length} tasks...` }],
+						content: [
+							{ type: "text", text: `Running ${taskList.length} tasks...` },
+						],
 						details: {
 							mode: "parallel" as const,
 							results: [...allResults],
@@ -814,19 +978,29 @@ export default function (pi: ExtensionAPI) {
 				};
 				const fireParallelUpdate = throttle(flushParallelUpdate, 150);
 
-				const results = await mapConcurrent(taskList, maxConcurrency, async (t, idx) => {
-					const agent = agents.find((a) => a.name === t.agent)!;
-					const result = await runSubagent(agent, t.task, t.cwd ?? cwd, signal, (progress) => {
-						allResults[idx].progress = progress;
-						fireParallelUpdate();
-					});
+				const results = await mapConcurrent(
+					taskList,
+					maxConcurrency,
+					async (t, idx) => {
+						const agent = agents.find((a) => a.name === t.agent)!;
+						const result = await runSubagent(
+							agent,
+							t.task,
+							t.cwd ?? cwd,
+							signal,
+							(progress) => {
+								allResults[idx].progress = progress;
+								fireParallelUpdate();
+							},
+						);
 
-					// Update allResults with the completed result so the UI reflects it immediately
-					allResults[idx] = result;
-					flushParallelUpdate();
+						// Update allResults with the completed result so the UI reflects it immediately
+						allResults[idx] = result;
+						flushParallelUpdate();
 
-					return result;
-				});
+						return result;
+					},
+				);
 
 				// Build final output text
 				const outputParts = results.map((r) => {
@@ -843,7 +1017,9 @@ export default function (pi: ExtensionAPI) {
 				const agent = agents.find((a) => a.name === params.agent);
 				if (!agent) {
 					const available = agents.map((a) => a.name).join(", ") || "none";
-					throw new Error(`Unknown agent: ${params.agent}. Available agents: ${available}`);
+					throw new Error(
+						`Unknown agent: ${params.agent}. Available agents: ${available}`,
+					);
 				}
 
 				const liveResult: AgentResult = {
@@ -852,16 +1028,38 @@ export default function (pi: ExtensionAPI) {
 					output: "",
 					exitCode: -1,
 					model: agent.model,
-					usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: 0, turns: 0 },
-					progress: { agent: params.agent!, status: "running" as const, task: params.task!, recentTools: [], toolCount: 0, tokens: 0, durationMs: 0, lastMessage: "" },
+					usage: {
+						input: 0,
+						output: 0,
+						cacheRead: 0,
+						cacheWrite: 0,
+						cost: 0,
+						turns: 0,
+					},
+					progress: {
+						agent: params.agent!,
+						status: "running" as const,
+						task: params.task!,
+						recentTools: [],
+						toolCount: 0,
+						tokens: 0,
+						durationMs: 0,
+						lastMessage: "",
+					},
 				};
-				const result = await runSubagent(agent, params.task, params.cwd ?? cwd, signal, (progress) => {
-					liveResult.progress = progress;
-					onUpdate?.({
-						content: [{ type: "text", text: "(running...)" }],
-						details: { mode: "single" as const, results: [liveResult] },
-					});
-				});
+				const result = await runSubagent(
+					agent,
+					params.task,
+					params.cwd ?? cwd,
+					signal,
+					(progress) => {
+						liveResult.progress = progress;
+						onUpdate?.({
+							content: [{ type: "text", text: "(running...)" }],
+							details: { mode: "single" as const, results: [liveResult] },
+						});
+					},
+				);
 
 				const isError = result.exitCode !== 0 || !!result.progress.error;
 				return {
@@ -870,7 +1068,9 @@ export default function (pi: ExtensionAPI) {
 					...(isError ? { isError: true } : {}),
 				};
 			} else {
-				throw new Error("Provide either (agent + task) for single mode, or tasks[] for parallel mode.");
+				throw new Error(
+					"Provide either (agent + task) for single mode, or tasks[] for parallel mode.",
+				);
 			}
 		},
 
@@ -880,16 +1080,21 @@ export default function (pi: ExtensionAPI) {
 				const agentNames = args.tasks.map((t: any) => t.agent).join(", ");
 				return new Text(
 					`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "parallel")} ${theme.fg("dim", `(${args.tasks.length} tasks: ${agentNames})`)}`,
-					0, 0,
+					0,
+					0,
 				);
 			}
 			if (args.agent) {
 				const taskPreview = args.task
-					? (args.task.length > 60 ? args.task.slice(0, 60) + "…" : args.task).replace(/\n/g, " ")
+					? (args.task.length > 60
+							? args.task.slice(0, 60) + "…"
+							: args.task
+						).replace(/\n/g, " ")
 					: "";
 				return new Text(
 					`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", args.agent)} ${theme.fg("dim", taskPreview)}`,
-					0, 0,
+					0,
+					0,
 				);
 			}
 			return new Text(theme.fg("toolTitle", theme.bold("subagent")), 0, 0);
@@ -911,22 +1116,31 @@ export default function (pi: ExtensionAPI) {
 			if (details.mode === "parallel") {
 				// Parallel summary header
 				const ok = details.results.filter((r) => r.exitCode === 0).length;
-				const running = details.results.filter((r) => r.progress?.status === "running").length;
-				const totalIcon = running > 0
-					? theme.fg("warning", "⟳")
-					: ok === details.results.length
-						? theme.fg("success", "✓")
-						: theme.fg("error", "✗");
+				const running = details.results.filter(
+					(r) => r.progress?.status === "running",
+				).length;
+				const totalIcon =
+					running > 0
+						? theme.fg("warning", "⟳")
+						: ok === details.results.length
+							? theme.fg("success", "✓")
+							: theme.fg("error", "✗");
 
-				const totalDuration = Math.max(...details.results.map((r) => r.progress?.durationMs || 0));
-				const totalTokens = details.results.reduce((s, r) => s + (r.progress?.tokens || 0), 0);
+				const totalDuration = Math.max(
+					...details.results.map((r) => r.progress?.durationMs || 0),
+				);
+				const totalTokens = details.results.reduce(
+					(s, r) => s + (r.progress?.tokens || 0),
+					0,
+				);
 				c.addChild(
 					new Text(
 						truncLine(
 							`${totalIcon} ${theme.fg("toolTitle", theme.bold("parallel"))} ${ok}/${details.results.length} completed · ${formatTokens(totalTokens)} tok · ${formatDuration(totalDuration)}`,
 							w,
 						),
-						0, 0,
+						0,
+						0,
 					),
 				);
 				c.addChild(new Spacer(1));
