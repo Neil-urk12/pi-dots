@@ -675,18 +675,25 @@ export default function (pi: ExtensionAPI) {
 		const result = await runSubagent(agent, task, ctx.cwd, undefined);
 
 		if (result.exitCode !== 0 || result.progress.error) {
-			ctx.ui.notify(
-				`${agentName} failed: ${result.progress.error || `exit code ${result.exitCode}`}`,
-				"error",
+			pi.sendMessage(
+				{
+					customType: "subagent-error",
+					content: [{ type: "text", text: `${agentName} failed: ${result.progress.error || `exit code ${result.exitCode}`}` }],
+					display: true,
+				},
+				{ triggerTurn: true },
 			);
 			return;
 		}
 
-		const truncated = result.output.length > 600
-			? result.output.slice(0, 600) + "\n\n[truncated]"
-			: result.output;
-
-		ctx.ui.notify(truncated, "info");
+		pi.sendMessage(
+			{
+				customType: "subagent-result",
+				content: [{ type: "text", text: `/${agentName} ${task}\n\n${result.output}` }],
+				display: true,
+			},
+			{ triggerTurn: true },
+		);
 	}
 
 	pi.registerCommand("blitz", {
