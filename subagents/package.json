@@ -27,5 +27,10 @@
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
     "@mariozechner/pi-tui": "*"
+  },
+  "devDependencies": {
+    "@mariozechner/pi-coding-agent": "^0.73.1",
+    "@mariozechner/pi-tui": "^0.73.1",
+    "@types/node": "^25.6.2"
   }
 }
