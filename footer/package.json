@@ -1,5 +1,5 @@
 {
-  "name": "pi-clean-footer",
+  "name": "@neilurk12/pi-clean-footer",
   "version": "0.1.0",
   "description": "Clean adaptive footer extension for pi coding agent.",
   "type": "module",
@@ -10,6 +10,11 @@
     "terminal"
   ],
   "license": "MIT",
+  "files": [
+    "src",
+    "README.md",
+    "example.png"
+  ],
   "pi": {
     "extensions": [
       "./src/index.ts"
