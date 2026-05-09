@@ -1,0 +1,31 @@
+{
+  "name": "neilurk12/pi-subagents",
+  "version": "0.0.1",
+  "description": "Minimal subagents extension for pi coding agent — delegate tasks to scout, researcher, and worker agents with single and parallel execution.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "subagents",
+    "agent"
+  ],
+  "license": "MIT",
+  "files": [
+    "index.ts",
+    "agents",
+    "tools",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "dependencies": {
+    "typebox": "*"
+  },
+  "peerDependencies": {
+    "@mariozechner/pi-coding-agent": "*",
+    "@mariozechner/pi-tui": "*"
+  }
+}
