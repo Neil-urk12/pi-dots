@@ -38,6 +38,7 @@ export interface AgentConfig {
 	model: string;
 	systemPrompt: string;
 	filePath: string;
+	useParentExtensions?: boolean;
 }
 
 interface ToolEvent {
@@ -104,9 +105,9 @@ function loadConfig(): ExtensionConfig {
 	// Load from extension directory
 	try {
 		if (fs.existsSync(CONFIG_PATH)) {
-			return JSON.parse(
-				fs.readFileSync(CONFIG_PATH, "utf-8"),
-			) as ExtensionConfig;
+			const raw = fs.readFileSync(CONFIG_PATH, "utf-8");
+			const config = JSON.parse(raw) as ExtensionConfig;
+			return config;
 		}
 	} catch {}
 
@@ -119,9 +120,9 @@ function loadConfig(): ExtensionConfig {
 	);
 	try {
 		if (fs.existsSync(userConfigPath)) {
-			return JSON.parse(
-				fs.readFileSync(userConfigPath, "utf-8"),
-			) as ExtensionConfig;
+			const raw = fs.readFileSync(userConfigPath, "utf-8");
+			const config = JSON.parse(raw) as ExtensionConfig;
+			return config;
 		}
 	} catch {}
 
@@ -147,12 +148,7 @@ const EXT_BASE = path.join(
 	"extensions",
 );
 const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
-	web_search: path.join(EXT_BASE, "web-search", "index.ts"),
-	web_fetch: path.join(EXT_BASE, "web-fetch", "index.ts"),
 	bash_guard: path.join(TOOLS_DIR, "bash-guard.ts"),
-	video_extract: path.join(EXT_BASE, "video-extract", "index.ts"),
-	youtube_search: path.join(EXT_BASE, "youtube-search", "index.ts"),
-	google_image_search: path.join(EXT_BASE, "google-image-search", "index.ts"),
 };
 
 // ── Agent Discovery & Registration ────────────────────────────────────
@@ -199,6 +195,7 @@ function loadAgents(config: ExtensionConfig): AgentConfig[] {
 				"anthropic/claude-sonnet-4-6",
 			systemPrompt: body,
 			filePath,
+			useParentExtensions: frontmatter.useParentExtensions === "true",
 		});
 	}
 	return agents;
@@ -331,9 +328,6 @@ async function buildPiArgs(
 			extensionPaths.add(CUSTOM_TOOL_EXTENSIONS[tool]);
 		}
 	}
-
-	// Use --no-extensions then add only what we need
-	args.push("--no-extensions");
 
 	if (builtinTools.length > 0) {
 		args.push("--tools", builtinTools.join(","));
