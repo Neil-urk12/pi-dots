@@ -148,6 +148,8 @@ const EXT_BASE = path.join(
 	"extensions",
 );
 const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
+	web_search: path.join(EXT_BASE, "web-search", "index.ts"),
+	web_fetch: path.join(EXT_BASE, "web-fetch", "index.ts"),
 	bash_guard: path.join(TOOLS_DIR, "bash-guard.ts"),
 };
 
@@ -327,6 +329,10 @@ async function buildPiArgs(
 		} else if (CUSTOM_TOOL_EXTENSIONS[tool]) {
 			extensionPaths.add(CUSTOM_TOOL_EXTENSIONS[tool]);
 		}
+	}
+
+	if (!agent.useParentExtensions) {
+		args.push("--no-extensions");
 	}
 
 	if (builtinTools.length > 0) {
