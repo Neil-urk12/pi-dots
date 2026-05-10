@@ -13,81 +13,34 @@ import type {
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
 import {
-	getMarkdownTheme,
 	parseFrontmatter,
 	truncateHead,
 	withFileMutationQueue,
 	DEFAULT_MAX_BYTES,
 	DEFAULT_MAX_LINES,
 } from "@mariozechner/pi-coding-agent";
+import type {
+	AgentConfig,
+	AgentProgress,
+	AgentResult,
+	ExtensionConfig,
+} from "./src/types";
 import {
-	Container,
-	Markdown,
-	Spacer,
-	Text,
-	visibleWidth,
-} from "@mariozechner/pi-tui";
+	formatDuration,
+	formatTokens,
+	extractToolArgsPreview,
+} from "./src/format";
+import {
+	renderSubagentCall,
+	renderSubagentResult,
+	getTermWidth,
+} from "./src/renderer";
 import { Type } from "typebox";
 
-// ── Types ──────────────────────────────────────────────────────────────
+export type { AgentConfig };
 
-export interface AgentConfig {
-	name: string;
-	description: string;
-	tools: string[];
-	model: string;
-	systemPrompt: string;
-	filePath: string;
-	useParentExtensions?: boolean;
-}
-
-interface ToolEvent {
-	tool: string;
-	args: string;
-}
-
-interface AgentProgress {
-	agent: string;
-	status: "pending" | "running" | "completed" | "failed";
-	task: string;
-	currentTool?: string;
-	currentToolArgs?: string;
-	recentTools: ToolEvent[];
-	toolCount: number;
-	tokens: number;
-	durationMs: number;
-	lastMessage: string;
-	error?: string;
-}
-
-interface AgentResult {
-	agent: string;
-	task: string;
-	output: string;
-	exitCode: number;
-	progress: AgentProgress;
-	model?: string;
-	usage: {
-		input: number;
-		output: number;
-		cacheRead: number;
-		cacheWrite: number;
-		cost: number;
-		turns: number;
-	};
-}
-
-interface Details {
-	mode: "single" | "parallel";
-	results: AgentResult[];
-}
 
 // ── Config ─────────────────────────────────────────────────────────────
-
-interface ExtensionConfig {
-	maxConcurrency?: number;
-	models?: Record<string, string>;
-}
 
 const DEFAULT_MODELS: Record<string, string> = {
 	blitz: "anthropic/claude-haiku-4-5",
@@ -174,7 +127,7 @@ export function unregisterAgent(name: string): void {
 
 function loadAgents(config: ExtensionConfig): AgentConfig[] {
 	const agents: AgentConfig[] = [];
-	const modelDefaults = { ...DEFAULT_MODELS, ...(config.models ?? {}) };
+	const modelDefaults = { ...DEFAULT_MODELS, ...config.models };
 	if (!fs.existsSync(AGENTS_DIR)) return agents;
 	for (const entry of fs.readdirSync(AGENTS_DIR)) {
 		if (!entry.endsWith(".md")) continue;
@@ -219,84 +172,12 @@ function resolvePiBinary(): { command: string; baseArgs: string[] } {
 	return { command: "pi", baseArgs: [] };
 }
 
-// ── Formatting Utilities ──────────────────────────────────────────────
-
-function formatTokens(n: number): string {
-	return n < 1000
-		? String(n)
-		: n < 10000
-			? `${(n / 1000).toFixed(1)}k`
-			: `${Math.round(n / 1000)}k`;
-}
-
-function formatDuration(ms: number): string {
-	if (ms < 1000) return `${ms}ms`;
-	if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-	return `${Math.floor(ms / 60000)}m${Math.floor((ms % 60000) / 1000)}s`;
-}
-
-function formatToolPreview(
-	name: string,
-	args: Record<string, unknown>,
-): string {
-	switch (name) {
-		case "bash":
-		case "bash_guard":
-			return `$ ${((args.command as string) || "").slice(0, 80)}`;
-		case "read":
-			return `read ${(args.path as string) || ""}`;
-		case "write":
-			return `write ${(args.path as string) || ""}`;
-		case "edit":
-			return `edit ${(args.path as string) || ""}`;
-		case "grep":
-			return `grep ${(args.pattern as string) || ""}`;
-		case "find":
-			return `find ${(args.pattern as string) || ""}`;
-		case "ls":
-			return `ls ${(args.path as string) || "."}`;
-		case "web_search":
-			return `search "${(args.query as string) || ""}"`;
-		case "web_fetch":
-			return `fetch ${(args.url as string) || ""}`;
-		default: {
-			const s = JSON.stringify(args);
-			return `${name} ${s.slice(0, 60)}`;
-		}
-	}
-}
-
-function truncLine(text: string, maxWidth: number): string {
-	if (visibleWidth(text) <= maxWidth) return text;
-	// Simple truncation - strip to fit
-	let result = "";
-	let width = 0;
-	for (let i = 0; i < text.length; i++) {
-		const ch = text[i];
-		// Skip ANSI escape sequences
-		if (ch === "\x1b") {
-			const match = text.slice(i).match(/^\x1b\[[0-9;]*m/);
-			if (match) {
-				result += match[0];
-				i += match[0].length - 1;
-				continue;
-			}
-		}
-		if (width >= maxWidth - 1) {
-			return result + "…";
-		}
-		result += ch;
-		width++;
-	}
-	return result;
-}
-
 // ── Subagent Execution ────────────────────────────────────────────────
 
 async function buildPiArgs(
 	agent: AgentConfig,
 	task: string,
-	cwd: string,
+	_cwd: string,
 ): Promise<{ args: string[]; tempDir: string }> {
 	const piBin = resolvePiBinary();
 	const tempDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), "pi-sub-"));
@@ -377,16 +258,6 @@ function extractTextFromContent(content: unknown): string {
 			.join("\n");
 	}
 	return "";
-}
-
-function extractToolArgsPreview(args: Record<string, unknown>): string {
-	if (args.command) return String(args.command).slice(0, 100);
-	if (args.path) return String(args.path);
-	if (args.query) return `"${String(args.query).slice(0, 80)}"`;
-	if (args.url) return String(args.url);
-	if (args.pattern) return String(args.pattern);
-	const s = JSON.stringify(args);
-	return s.length > 80 ? s.slice(0, 80) + "…" : s;
 }
 
 async function runSubagent(
@@ -611,7 +482,7 @@ async function mapConcurrent<T, R>(
 	concurrency: number,
 	fn: (item: T, index: number) => Promise<R>,
 ): Promise<R[]> {
-	const results: R[] = new Array(items.length);
+	const results: R[] = Array.from({ length: items.length });
 	let nextIndex = 0;
 
 	async function worker() {
@@ -627,132 +498,6 @@ async function mapConcurrent<T, R>(
 	);
 	await Promise.all(workers);
 	return results;
-}
-
-// ── Rendering ─────────────────────────────────────────────────────────
-
-type Theme = ExtensionContext["ui"]["theme"];
-type Component =
-	ReturnType<typeof Text.prototype.render> extends string[] ? Text : any;
-
-function getTermWidth(): number {
-	return process.stdout.columns || 120;
-}
-
-function renderAgentProgress(
-	r: AgentResult,
-	theme: Theme,
-	expanded: boolean,
-	w: number,
-): Container {
-	const c = new Container();
-	const prog = r.progress;
-	const isRunning = prog.status === "running";
-	const isPending = prog.status === "pending";
-
-	// Header: icon + agent + stats (always one line, truncated)
-	const icon = isRunning
-		? theme.fg("warning", "⟳")
-		: isPending
-			? theme.fg("dim", "○")
-			: r.exitCode === 0
-				? theme.fg("success", "✓")
-				: theme.fg("error", "✗");
-	const stats = `${prog.toolCount} tools · ${formatTokens(prog.tokens)} tok · ${formatDuration(prog.durationMs)}`;
-	const modelStr = r.model ? theme.fg("dim", ` (${r.model})`) : "";
-	c.addChild(
-		new Text(
-			truncLine(
-				`${icon} ${theme.fg("toolTitle", theme.bold(r.agent))}${modelStr} — ${theme.fg("dim", stats)}`,
-				w,
-			),
-			0,
-			0,
-		),
-	);
-
-	// Task
-	if (expanded) {
-		// Full task, Text wraps naturally
-		c.addChild(new Text(theme.fg("dim", `Task: ${r.task}`), 0, 0));
-	} else {
-		// Truncate to one line
-		const flat = r.task.replace(/\n/g, " ");
-		c.addChild(new Text(truncLine(theme.fg("dim", `Task: ${flat}`), w), 0, 0));
-	}
-
-	// Current tool (running state)
-	if (isRunning && prog.currentTool) {
-		const toolLine = prog.currentToolArgs
-			? `${prog.currentTool}: ${prog.currentToolArgs}`
-			: prog.currentTool;
-		if (expanded) {
-			c.addChild(new Text(theme.fg("warning", `▸ ${toolLine}`), 0, 0));
-		} else {
-			c.addChild(
-				new Text(truncLine(theme.fg("warning", `▸ ${toolLine}`), w), 0, 0),
-			);
-		}
-	}
-
-	// Recent tools (always all)
-	const toolsToShow = prog.recentTools;
-	for (const t of toolsToShow) {
-		const line = `  ${t.tool}: ${t.args}`;
-		if (expanded) {
-			c.addChild(new Text(theme.fg("muted", line), 0, 0));
-		} else {
-			c.addChild(new Text(truncLine(theme.fg("muted", line), w), 0, 0));
-		}
-	}
-
-	// Latest assistant message — the prose "thinking" text, always visible
-	if (prog.lastMessage) {
-		c.addChild(new Spacer(1));
-		if (expanded) {
-			c.addChild(new Text(theme.fg("text", prog.lastMessage), 0, 0));
-		} else {
-			c.addChild(
-				new Text(truncLine(theme.fg("text", prog.lastMessage), w), 0, 0),
-			);
-		}
-	}
-
-	// Expanded: full final output
-	if (!isRunning && r.output && expanded) {
-		c.addChild(new Spacer(1));
-		const mdTheme = getMarkdownTheme();
-		c.addChild(new Markdown(r.output, 0, 0, mdTheme));
-	}
-
-	// Usage breakdown
-	c.addChild(new Spacer(1));
-	const usageParts: string[] = [];
-	if (r.usage.turns)
-		usageParts.push(`${r.usage.turns} turn${r.usage.turns > 1 ? "s" : ""}`);
-	if (r.usage.input) usageParts.push(`in:${formatTokens(r.usage.input)}`);
-	if (r.usage.output) usageParts.push(`out:${formatTokens(r.usage.output)}`);
-	if (r.usage.cacheRead)
-		usageParts.push(`cR:${formatTokens(r.usage.cacheRead)}`);
-	if (r.usage.cacheWrite)
-		usageParts.push(`cW:${formatTokens(r.usage.cacheWrite)}`);
-	if (r.usage.cost) usageParts.push(`$${r.usage.cost.toFixed(4)}`);
-	if (usageParts.length) {
-		c.addChild(new Text(theme.fg("dim", usageParts.join(" · ")), 0, 0));
-	}
-
-	// Error
-	if (prog.error) {
-		if (expanded) {
-			c.addChild(new Text(theme.fg("error", `Error: ${prog.error}`), 0, 0));
-		} else {
-			c.addChild(
-				new Text(truncLine(theme.fg("error", `Error: ${prog.error}`), w), 0, 0),
-			);
-		}
-	}
-
-	return c;
 }
 
 // ── Extension ─────────────────────────────────────────────────────────
@@ -1075,88 +820,13 @@ export default function (pi: ExtensionAPI) {
 		},
 
 		// ── Render: tool call header ──
-		renderCall(args, theme, _context) {
-			if (args.tasks && args.tasks.length > 0) {
-				const agentNames = args.tasks.map((t: any) => t.agent).join(", ");
-				return new Text(
-					`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", "parallel")} ${theme.fg("dim", `(${args.tasks.length} tasks: ${agentNames})`)}`,
-					0,
-					0,
-				);
-			}
-			if (args.agent) {
-				const taskPreview = args.task
-					? (args.task.length > 60
-							? args.task.slice(0, 60) + "…"
-							: args.task
-						).replace(/\n/g, " ")
-					: "";
-				return new Text(
-					`${theme.fg("toolTitle", theme.bold("subagent"))} ${theme.fg("accent", args.agent)} ${theme.fg("dim", taskPreview)}`,
-					0,
-					0,
-				);
-			}
-			return new Text(theme.fg("toolTitle", theme.bold("subagent")), 0, 0);
+		renderCall(args, theme) {
+			return renderSubagentCall(args, theme);
 		},
 
 		// ── Render: result ──
-		renderResult(result, options, theme, context) {
-			const details = result.details as Details | undefined;
-			if (!details?.results?.length) {
-				const t = result.content[0];
-				const text = t?.type === "text" ? t.text : "(no output)";
-				return new Text(text.slice(0, 200), 0, 0);
-			}
-
-			const w = getTermWidth() - 4;
-			const expanded = options.expanded;
-			const c = new Container();
-
-			if (details.mode === "parallel") {
-				// Parallel summary header
-				const ok = details.results.filter((r) => r.exitCode === 0).length;
-				const running = details.results.filter(
-					(r) => r.progress?.status === "running",
-				).length;
-				const totalIcon =
-					running > 0
-						? theme.fg("warning", "⟳")
-						: ok === details.results.length
-							? theme.fg("success", "✓")
-							: theme.fg("error", "✗");
-
-				const totalDuration = Math.max(
-					...details.results.map((r) => r.progress?.durationMs || 0),
-				);
-				const totalTokens = details.results.reduce(
-					(s, r) => s + (r.progress?.tokens || 0),
-					0,
-				);
-				c.addChild(
-					new Text(
-						truncLine(
-							`${totalIcon} ${theme.fg("toolTitle", theme.bold("parallel"))} ${ok}/${details.results.length} completed · ${formatTokens(totalTokens)} tok · ${formatDuration(totalDuration)}`,
-							w,
-						),
-						0,
-						0,
-					),
-				);
-				c.addChild(new Spacer(1));
-
-				for (let i = 0; i < details.results.length; i++) {
-					const r = details.results[i];
-					c.addChild(renderAgentProgress(r, theme, expanded, w));
-					if (i < details.results.length - 1) c.addChild(new Spacer(1));
-				}
-			} else {
-				// Single agent
-				const r = details.results[0];
-				c.addChild(renderAgentProgress(r, theme, expanded, w));
-			}
-
-			return c;
+		renderResult(result, options, theme) {
+			return renderSubagentResult(result, options, theme, getTermWidth() - 4);
 		},
 	});
 }
