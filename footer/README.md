@@ -1,6 +1,6 @@
 # pi-clean-footer
 
-Clean adaptive footer extension for [pi](https://pi.dev).
+Clean, minimal, and lightweight powerline-style footer extension for [pi](https://pi.dev).
 
 Shows a compact split footer:
 

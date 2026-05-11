@@ -5,49 +5,19 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { execFile } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
-const DEFAULT_GIT_REFRESH_DEBOUNCE_MS = 500;
 
 type Theme = ExtensionContext["ui"]["theme"];
 
-type CleanFooterConfig = {
-	enabled?: boolean;
-	showGit?: boolean;
-	showTokens?: boolean;
-	showCache?: boolean;
-	showContext?: boolean;
-	showDirectory?: boolean;
-	showEffort?: boolean;
-	gitRefreshDebounceMs?: number;
-	contextWarningPercent?: number;
-	contextDangerPercent?: number;
-	modelAliases?: Record<string, string>;
-	colors?: Partial<ColorConfig>;
-};
-
-type ResolvedConfig = Required<
-	Omit<CleanFooterConfig, "modelAliases" | "colors">
-> & {
-	modelAliases: Record<string, string>;
-	colors: ColorConfig;
-};
-
-type ColorConfig = {
-	model: string;
-	directory: string;
-	git: string;
-	gitDirty: string;
-	contextNormal: string;
-	contextWarning: string;
-	contextDanger: string;
-	tokens: string;
-	separator: string;
-};
+import {
+	defaultConfig,
+	loadConfig,
+	type ResolvedConfig,
+} from "./config.js";
 
 type GitState = {
 	inRepo: boolean;
@@ -72,31 +42,6 @@ type FooterRuntime = {
 	configPaths: { global: string; project: string };
 	loadedConfigPaths: string[];
 	configError?: string;
-};
-
-const defaultConfig: ResolvedConfig = {
-	enabled: true,
-	showGit: true,
-	showTokens: true,
-	showCache: true,
-	showContext: true,
-	showDirectory: true,
-	showEffort: true,
-	gitRefreshDebounceMs: DEFAULT_GIT_REFRESH_DEBOUNCE_MS,
-	contextWarningPercent: 70,
-	contextDangerPercent: 85,
-	modelAliases: {},
-	colors: {
-		model: "accent",
-		directory: "dim",
-		git: "success",
-		gitDirty: "warning",
-		contextNormal: "success",
-		contextWarning: "warning",
-		contextDanger: "error",
-		tokens: "muted",
-		separator: "dim",
-	},
 };
 
 const runtime: FooterRuntime = {
@@ -124,7 +69,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (command === "reload") {
-				loadConfig(ctx.cwd);
+				loadRuntimeConfig(ctx.cwd);
 				runtime.enabled = runtime.config.enabled;
 				if (ctx.hasUI && runtime.enabled) installFooter(ctx);
 				if (ctx.hasUI && !runtime.enabled) ctx.ui.setFooter(undefined);
@@ -155,7 +100,7 @@ export default function (pi: ExtensionAPI) {
 	});
 
 	pi.on("session_start", async (_event, ctx) => {
-		loadConfig(ctx.cwd);
+		loadRuntimeConfig(ctx.cwd);
 		runtime.enabled = runtime.config.enabled;
 		runtime.thinkingLevel = normalizeThinkingLevel(pi.getThinkingLevel?.());
 		if (!ctx.hasUI || !runtime.enabled) return;
@@ -270,90 +215,13 @@ function installFooter(ctx: ExtensionContext) {
 	});
 }
 
-function loadConfig(cwd: string) {
-	const configPaths = {
-		global: path.join(os.homedir(), ".pi", "agent", "clean-footer.json"),
-		project: path.join(cwd, ".pi", "clean-footer.json"),
-	};
-
-	const loaded: string[] = [];
-	let merged: CleanFooterConfig = {};
-	let error: string | undefined;
-
-	for (const configPath of [configPaths.global, configPaths.project]) {
-		if (!existsSync(configPath)) continue;
-		try {
-			const parsed = JSON.parse(
-				readFileSync(configPath, "utf8"),
-			) as CleanFooterConfig;
-			merged = mergeConfig(merged, parsed);
-			loaded.push(configPath);
-		} catch (err) {
-			error = `${configPath}: ${err instanceof Error ? err.message : String(err)}`;
-		}
-	}
-
-	runtime.configPaths = configPaths;
-	runtime.loadedConfigPaths = loaded;
-	runtime.configError = error;
-	runtime.config = resolveConfig(merged);
-}
-
-function mergeConfig(
-	base: CleanFooterConfig,
-	override: CleanFooterConfig,
-): CleanFooterConfig {
-	return {
-		...base,
-		...override,
-		modelAliases: {
-			...(base.modelAliases ?? {}),
-			...(override.modelAliases ?? {}),
-		},
-		colors: {
-			...(base.colors ?? {}),
-			...(override.colors ?? {}),
-		},
-	};
-}
-
-function resolveConfig(config: CleanFooterConfig): ResolvedConfig {
-	return {
-		...defaultConfig,
-		...config,
-		gitRefreshDebounceMs: positiveNumber(
-			config.gitRefreshDebounceMs,
-			defaultConfig.gitRefreshDebounceMs,
-		),
-		contextWarningPercent: percentNumber(
-			config.contextWarningPercent,
-			defaultConfig.contextWarningPercent,
-		),
-		contextDangerPercent: percentNumber(
-			config.contextDangerPercent,
-			defaultConfig.contextDangerPercent,
-		),
-		modelAliases: {
-			...defaultConfig.modelAliases,
-			...(config.modelAliases ?? {}),
-		},
-		colors: { ...defaultConfig.colors, ...(config.colors ?? {}) },
-	};
-}
-
-function positiveNumber(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0
-		? value
-		: fallback;
-}
-
-function percentNumber(value: unknown, fallback: number): number {
-	return typeof value === "number" &&
-		Number.isFinite(value) &&
-		value >= 0 &&
-		value <= 100
-		? value
-		: fallback;
+function loadRuntimeConfig(cwd: string) {
+	const projectPath = path.join(cwd, ".pi", "clean-footer.json");
+	const result = loadConfig([runtime.configPaths.global, projectPath]);
+	runtime.configPaths = { global: runtime.configPaths.global, project: projectPath };
+	runtime.loadedConfigPaths = result.loadedPaths;
+	runtime.configError = result.error;
+	runtime.config = result.config;
 }
 
 function notifyConfigStatus(ctx: ExtensionContext) {
