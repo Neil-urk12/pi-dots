@@ -1,0 +1,33 @@
+{
+  "name": "pi-modes",
+  "version": "0.1.0",
+  "description": "Three-mode extension for pi coding agent: yolo, plan, orchestrator",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "type": "module",
+  "files": ["dist", "README.md", "LICENSE"],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "pi",
+    "coding-agent",
+    "extension",
+    "modes",
+    "yolo",
+    "plan",
+    "orchestrator"
+  ],
+  "author": "",
+  "license": "MIT",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.1.0"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "latest",
+    "@earendil-works/pi-tui": "latest",
+    "typescript": "^6.0.3"
+  }
+}

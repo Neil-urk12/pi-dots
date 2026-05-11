@@ -20,7 +20,7 @@ Shows a compact split footer:
 
 ## Install
 
-From npm (recommended):
+From npm (recommended) | https://www.npmjs.com/package/@neilurk12/pi-clean-footer:
 
 ```bash
 pi install @neilurk12/pi-clean-footer
