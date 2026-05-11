@@ -116,7 +116,7 @@ This package declares its extension through `package.json`:
 ```json
 {
   "pi": {
-    "extensions": ["./src/index.ts"]
+    "extensions": ["./dist/index.js"]
   }
 }
 ```
