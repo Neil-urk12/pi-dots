@@ -6,8 +6,7 @@ import type { ModeDefinition } from "./types.js";
 import { getLegacyConfig } from "./legacy-config.js";
 type Mode = "yolo" | "plan" | "orchestrator";
 
-const PLAN_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"] as const;
-
+// Plan mode bash command filtering
 // Destructive command patterns (blocked in plan mode)
 const DESTRUCTIVE_PATTERNS = [
   /\brm\b/i,
@@ -100,44 +99,9 @@ const SAFE_PATTERNS = [
 ] as const;
 
 function isSafeCommand(command: string): boolean {
-  const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
-  const isSafe = SAFE_PATTERNS.some((p) => p.test(command));
-  return !isDestructive && isSafe;
+  return !DESTRUCTIVE_PATTERNS.some(p => p.test(command)) && SAFE_PATTERNS.some(p => p.test(command));
 }
 
-const MODE_PROMPTS: Record<Mode, string> = {
-  yolo: "",
-  plan: `
-You are in PLAN MODE — a read-only exploration mode for safe code analysis.
-
-RESTRICTIONS:
-- Allowed tools: read, bash, grep, find, ls, questionnaire
-- Forbidden tools: edit, write (cannot modify files)
-- Bash commands are restricted to an allowlist of read-only commands; destructive commands are automatically blocked.
-
-ACTIONS:
-- Explore the codebase deeply using the allowed tools.
-- Ask clarifying questions using the questionnaire tool.
-- When asked, create a detailed, numbered plan under a "Plan:" header:
-
-Plan:
-1. First step
-2. Second step
-...
-
-DO NOT attempt to make any file changes. Only describe what you would do.
-`,
-  orchestrator: `
-You are in ORCHESTRATOR MODE — act as a coordinator of work.
-
-PRINCIPLES:
-- Break complex tasks into subtasks.
-- Delegate subtasks using the 'subagent' tool to specialized agents (e.g., coder, reviewer, tester).
-- For simple changes that you can do directly, perform them yourself.
-- Track progress and synthesize results from subagents.
-- Plan first, then orchestrate execution using subagents where beneficial.
-`,
-};
 
 // Phase 1: markdown-driven mode definitions
 const modeDefinitions = new Map<Mode, ModeDefinition>();
@@ -209,6 +173,12 @@ export default function (pi: ExtensionAPI) {
 
   // commands
   async function handleModeCommand(args: string | undefined, ctx: ExtensionContext): Promise<void> {
+    // status subcommand
+    if (args && args.trim().toLowerCase() === "status") {
+      await showModeStatus(ctx);
+      return;
+    }
+
     if (args && args.trim()) {
       const mode = args.trim().toLowerCase() as Mode;
       if (!["yolo", "plan", "orchestrator"].includes(mode)) {
@@ -219,12 +189,14 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // interactive selector
-    const choice = await ctx.ui.select("Select mode:", [
-      "YOLO (full access, no restrictions)",
-      "PLAN (read-only exploration)",
-      "ORCHESTRATOR (delegate via subagents)",
-    ]);
+    // interactive selector with mode descriptions
+    const modes: Mode[] = ["yolo", "plan", "orchestrator"];
+    const options = modes.map(m => {
+      const def = modeDefinitions.get(m);
+      const name = m.toUpperCase();
+      return def?.description ? `${name} — ${def.description}` : name;
+    });
+    const choice = await ctx.ui.select("Select mode:", options);
 
     let mode: Mode = "yolo";
     if (choice) {
@@ -260,19 +232,6 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Permission gate for plan mode (block destructive/bash)
-  pi.on("tool_call", async (event, ctx) => {
-    if (currentMode !== "plan") return;
-    if (event.toolName !== "bash") return;
-
-    const command = event.input.command as string;
-    if (!isSafeCommand(command)) {
-      return {
-        block: true,
-        reason: `Plan mode blocked command: ${command}\nUse /mode yolo to allow bash execution.`,
-      };
-    }
-  });
 
   // Inject mode prompt on every provider request (compaction-safe)
   pi.on("before_provider_request", async (event) => {
@@ -298,6 +257,16 @@ export default function (pi: ExtensionAPI) {
     injectIntoPayload(event.payload, `\n\n[MODE: ${currentMode.toUpperCase()}]
 ${promptSuffix}`.trim());
   });
+  // Gate bash commands in plan mode
+  pi.on("tool_call", async (event, ctx) => {
+    if (currentMode !== "plan") return;
+    if (event.toolName !== "bash") return;
+    const command = event.input.command as string;
+    if (!isSafeCommand(command)) {
+      return { block: true, reason: `Plan mode blocked command: ${command}\nUse /mode yolo to allow bash execution.` };
+    }
+  });
+
 
   // Switch mode logic
   function setMode(mode: Mode, ctx: ExtensionContext) {
@@ -426,7 +395,19 @@ ${promptSuffix}`.trim());
   // Persist after each turn to keep latest
   pi.on("turn_end", async () => {
     persistMode();
-    // actually pi.appendEntry is independent
-    // persistMode already calls pi.appendEntry
   });
+
+  async function showModeStatus(ctx: ExtensionContext) {
+    const def = modeDefinitions.get(currentMode);
+    const allTools = pi.getAllTools().map(t => t.name);
+    const activeTools = (def?.enabled_tools && def.enabled_tools.length > 0)
+      ? def.enabled_tools
+      : (baselineTools.length === 0 ? allTools : baselineTools);
+
+    const suffixPreview = (def?.prompt_suffix || "").slice(0, 120) + (def?.prompt_suffix && def.prompt_suffix.length > 120 ? "..." : "");
+
+    const status = `Mode: ${currentMode}\nDescription: ${def?.description || "—"}\nActive tools (${activeTools.length}): ${activeTools.join(", ")}\nPrompt suffix: ${suffixPreview || "(none)"}\nBorder: ${def?.border_label || ""} (style: ${def?.border_style || "—"})`;
+
+    ctx.ui.notify(status, "info");
+  }
 }
