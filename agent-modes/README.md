@@ -35,6 +35,7 @@ pi --extension node_modules/pi-modes/dist/index.js
 ### Switching modes
 
 - `/mode` — interactive mode picker
+- `/mode status` — show current active tools and config
 - `/mode yolo|plan|orchestrator` — switch immediately
 - `/modes` — alias for `/mode`
 - `Ctrl+Shift+M` — cycle modes (yolo → plan → orchestrator)
@@ -55,8 +56,8 @@ Full unrestricted access. All tools available. No additional restrictions.
 ### PLAN (read-only)
 Safe exploration mode. Only read-only tools enabled:
 - Allowed tools: `read`, `bash`, `grep`, `find`, `ls`, `questionnaire`
-- Bash commands blocked: destructive operations (rm, mv, cp, mkdir, git write operations, npm install, etc.)
-- Cannot edit or write files
+- Bash is shell-filtered: destructive commands (rm, git push, npm install, etc.) are blocked by the extension.
+- edit/write/apply_patch are disabled by the harness
 
 Useful for exploring codebases, understanding structure, and planning changes without risk.
 
@@ -72,6 +73,22 @@ Requires the subagent extension to be loaded for full delegation capability.
 
 Mode selection persists across sessions. The current mode is stored in session history and restored on startup.
 
+## Markdown Mode Schema
+Modes are defined by markdown files in `modes/` with YAML frontmatter:
+```
+mode: yolo|plan|orchestrator
+enabled_tools: []   # empty = all tools; omitted = legacy fallback; non-empty = exact list
+description: "Brief UI description"
+border_label: " LABEL "
+border_style: accent|warning|success|muted
+prompt_suffix: |           # system prompt injected before each request
+  [MODE: ...]
+  instructions...
+```
+
+## Migration
+v0.2.1 (current): markdown-driven config, tool-level + shell-filtered safety in PLAN.
+v0.1.x → v0.2.x: replace extension files; modes/*.md included; no config migration needed.
 ## Development
 
 ```bash
