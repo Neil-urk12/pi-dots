@@ -65,7 +65,15 @@ export const defaultConfig: ResolvedConfig = {
 		tokens: "muted",
 		separator: "dim",
 	},
+
 };
+
+export function loadFooterConfig(
+	globalPath: string,
+	projectPath: string,
+): { config: ResolvedConfig; loadedPaths: string[]; error?: string } {
+	return loadConfig([globalPath, projectPath]);
+}
 
 export function loadConfig(paths: string[]): ConfigLoadResult {
 	const loaded: string[] = [];
@@ -92,7 +100,7 @@ export function loadConfig(paths: string[]): ConfigLoadResult {
 	};
 }
 
-function mergeConfig(
+export function mergeConfig(
 	base: CleanFooterConfig,
 	override: CleanFooterConfig,
 ): CleanFooterConfig {
@@ -110,7 +118,7 @@ function mergeConfig(
 	};
 }
 
-function resolveConfig(config: CleanFooterConfig): ResolvedConfig {
+export function resolveConfig(config: CleanFooterConfig): ResolvedConfig {
 	return {
 		...defaultConfig,
 		...config,
