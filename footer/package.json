@@ -1,6 +1,6 @@
 {
   "name": "@neilurk12/pi-clean-footer",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Clean, minimal, and lightweight powerline-style footer extension for pi coding agent.",
   "type": "module",
   "keywords": [
@@ -15,14 +15,23 @@
   },
   "license": "MIT",
   "files": [
-    "src",
+    "dist",
     "README.md",
     "example.png"
   ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "pi": {
     "extensions": [
-      "./src/index.ts"
+      "./dist/index.js"
     ]
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -30,6 +39,12 @@
     "@earendil-works/pi-tui": "*"
   },
   "devDependencies": {
+    "tsup": "^8.5.1",
     "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
