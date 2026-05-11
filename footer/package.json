@@ -9,6 +9,10 @@
     "footer",
     "terminal"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Neil-urk12/pi-dots.git"
+  },
   "license": "MIT",
   "files": [
     "src",
