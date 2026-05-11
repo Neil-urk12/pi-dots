@@ -1,6 +1,6 @@
 {
   "name": "@neilurk12/pi-clean-footer",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Clean, minimal, and lightweight powerline-style footer extension for pi coding agent.",
   "type": "module",
   "keywords": [
