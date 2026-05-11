@@ -1,6 +1,6 @@
 {
   "name": "pi-modes",
-  "version": "0.1.0",
+  "version": "0.1.5",
   "description": "Three-mode extension for pi coding agent: yolo, plan, orchestrator",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

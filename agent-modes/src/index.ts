@@ -1,3 +1,4 @@
+import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 
@@ -185,11 +186,14 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // Shortcut to cycle modes
-  pi.registerShortcut(Key.ctrlAlt("m"), {
-    description: "Cycle through modes",
+  // Shortcut: cycle mode
+  pi.registerShortcut(Key.ctrlShift("m"), {
+    description: "Cycle modes (yolo → plan → orchestrator)",
     handler: async (ctx) => {
-      cycleMode(ctx);
+      const modes: Mode[] = ["yolo", "plan", "orchestrator"];
+      const curIndex = modes.indexOf(currentMode);
+      const next = modes[(curIndex + 1) % modes.length];
+      setMode(next, ctx);
     },
   });
 
@@ -207,13 +211,29 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // Inject system prompt modifications based on mode
-  pi.on("before_agent_start", async (event) => {
+  // Inject mode prompt on every provider request (compaction-safe)
+  pi.on("before_provider_request", async (event) => {
     const promptSuffix = MODE_PROMPTS[currentMode];
     if (!promptSuffix) return;
-    return {
-      systemPrompt: `${event.systemPrompt}\n\n${promptSuffix}`.trim(),
-    };
+
+    function injectIntoPayload(payload: any, text: string): void {
+      if (typeof payload.system === "string") {
+        payload.system += text;
+      } else if (Array.isArray(payload.system)) {
+        payload.system.push({ type: "text", text });
+      } else if (Array.isArray(payload.messages)) {
+        const sysMsg = payload.messages.find((m: any) => m.role === "system");
+        if (sysMsg) {
+          if (typeof sysMsg.content === "string") sysMsg.content += text;
+          else if (Array.isArray(sysMsg.content)) sysMsg.content.push({ type: "text", text });
+        } else {
+          payload.messages.unshift({ role: "system", content: text });
+        }
+      }
+    }
+
+    injectIntoPayload(event.payload, `\n\n[MODE: ${currentMode.toUpperCase()}]
+${promptSuffix}`.trim());
   });
 
   // Switch mode logic
@@ -227,12 +247,6 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.notify(`Mode: ${mode.toUpperCase()}`, "info");
   }
 
-  function cycleMode(ctx: ExtensionContext) {
-    const modes: Mode[] = ["yolo", "plan", "orchestrator"];
-    const curIndex = modes.indexOf(currentMode);
-    const next = modes[(curIndex + 1) % modes.length];
-    setMode(next, ctx);
-  }
 
   function applyModeTools(ctx: ExtensionContext) {
     // Initialize baseline on first use
@@ -308,12 +322,45 @@ export default function (pi: ExtensionAPI) {
 
     applyModeTools(ctx);
     updateStatus(ctx);
+    // Set custom editor to display current mode in chat border
+    ctx.ui.setEditorComponent((tui, theme, keybindings) => {
+      class ModeEditor extends CustomEditor {
+        override render(width: number): string[] {
+          const lines = super.render(width);
+          if (lines.length === 0) return lines;
+
+          let label: string;
+          switch (currentMode) {
+            case "yolo":
+              label = " YOLO ";
+              break;
+            case "plan":
+              label = " PLAN ";
+              break;
+            case "orchestrator":
+              label = " ORCH ";
+              break;
+            default:
+              label = "";
+          }
+
+          if (label && lines.length > 0) {
+            const labelWidth = label.length;
+            const dashes = "─".repeat(Math.max(0, width - labelWidth));
+            const borderText = label + dashes;
+            lines[lines.length - 1] = theme.borderColor(borderText);
+          }
+          return lines;
+        }
+      }
+      return new ModeEditor(tui, theme, keybindings);
+    });
   });
 
   // Persist after each turn to keep latest
   pi.on("turn_end", async () => {
     persistMode(/*ctx, can't get here? we don't have ctx but pi.appendEntry doesn't need ctx*/);
     // actually pi.appendEntry is independent
-    pi.appendEntry("mode-state", { mode: currentMode });
+    // persistMode already calls pi.appendEntry
   });
 }
