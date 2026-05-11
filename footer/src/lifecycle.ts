@@ -101,13 +101,27 @@ export class FooterLifecycle {
 		await this.#git?.refresh();
 	}
 
-	reload(ctx: ExtensionContext): void {
+	async reload(ctx: ExtensionContext): Promise<void> {
 		this.#loadedConfig = loadFooterConfig(
 			this.#globalConfigPath,
 			this.#getProjectConfigPath(ctx.cwd),
 		);
 		this.#config = this.#loadedConfig.config;
 		this.#footerEnabled = this.#config.enabled;
+
+		this.#git?.clear();
+		this.#git = undefined;
+
+		if (this.#footerEnabled) {
+			this.#git = createGitState({
+				cwd: this.#cwd,
+				debounceMs: this.#config.gitRefreshDebounceMs,
+				enabled: this.#config.showGit,
+				onChange: () => this.#onRenderNeeded(),
+			});
+			await this.#git.refresh();
+		}
+
 		this.#onRenderNeeded();
 	}
 

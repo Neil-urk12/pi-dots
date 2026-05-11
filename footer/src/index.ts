@@ -39,7 +39,7 @@ export default function (pi: ExtensionAPI) {
 			}
 
 			if (command === "reload") {
-				lifecycle.reload(ctx);
+				await lifecycle.reload(ctx);
 				if (ctx.hasUI && lifecycle.isEnabled) installFooter(ctx);
 				if (ctx.hasUI && !lifecycle.isEnabled) ctx.ui.setFooter(undefined);
 				requestRender();
