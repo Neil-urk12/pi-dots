@@ -2,6 +2,8 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 
+import type { ModeDefinition } from "./types.js";
+import { getLegacyConfig } from "./legacy-config.js";
 type Mode = "yolo" | "plan" | "orchestrator";
 
 const PLAN_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"] as const;
@@ -137,6 +139,62 @@ PRINCIPLES:
 `,
 };
 
+// Phase 1: markdown-driven mode definitions
+const modeDefinitions = new Map<Mode, ModeDefinition>();
+
+async function loadModeFromDisk(mode: Mode, ctx?: ExtensionContext): Promise<ModeDefinition | null> {
+  try {
+    const fs = (await import("fs")).promises;
+    const path = await import("path");
+    const baseDir = path.dirname(new URL(import.meta.url).pathname);
+    const filePath = path.join(baseDir, "..", "modes", `${mode}.md`);
+    const raw = await fs.readFile(filePath, "utf-8");
+    // Parse YAML frontmatter
+    const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---/);
+    if (!frontmatterMatch) {
+      throw new Error("No YAML frontmatter found");
+    }
+    const yamlStr = frontmatterMatch[1];
+    const yaml = (await import("js-yaml")).default;
+    const parsed: any = yaml.load(yamlStr);
+
+    if (parsed.mode !== mode) {
+      throw new Error(`Mode field '${parsed.mode}' does not match filename '${mode}'`);
+    }
+
+    const def: ModeDefinition = {
+      mode: parsed.mode,
+      enabled_tools: parsed.enabled_tools,
+      prompt_suffix: parsed.prompt_suffix,
+      description: parsed.description,
+      border_label: parsed.border_label,
+      border_style: parsed.border_style,
+    };
+    return def;
+  } catch (err: any) {
+    if (ctx) {
+      ctx.ui.notify(`Mode '${mode}' config load error: ${err.message}`, "warning");
+    }
+    console.error(`Failed to load mode '${mode}' from disk:`, err);
+    return null;
+  }
+}
+
+async function loadAllModes(ctx: ExtensionContext): Promise<void> {
+  const modes: Mode[] = ["yolo", "plan", "orchestrator"];
+  for (const mode of modes) {
+    const fromDisk = await loadModeFromDisk(mode, ctx);
+    if (fromDisk) {
+      modeDefinitions.set(mode, fromDisk);
+      console.log(`[pi-modes] Loaded mode config from modes/${mode}.md`);
+    } else {
+      const legacy = getLegacyConfig(mode);
+      modeDefinitions.set(mode, legacy);
+      // warning already emitted by loadModeFromDisk
+    }
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   // internal state
   let currentMode: Mode = "yolo";
@@ -150,39 +208,44 @@ export default function (pi: ExtensionAPI) {
   });
 
   // commands
+  async function handleModeCommand(args: string | undefined, ctx: ExtensionContext): Promise<void> {
+    if (args && args.trim()) {
+      const mode = args.trim().toLowerCase() as Mode;
+      if (!["yolo", "plan", "orchestrator"].includes(mode)) {
+        ctx.ui.notify(`Invalid mode: ${mode}. Use yolo, plan, or orchestrator`, "error");
+        return;
+      }
+      setMode(mode, ctx);
+      return;
+    }
+
+    // interactive selector
+    const choice = await ctx.ui.select("Select mode:", [
+      "YOLO (full access, no restrictions)",
+      "PLAN (read-only exploration)",
+      "ORCHESTRATOR (delegate via subagents)",
+    ]);
+
+    let mode: Mode = "yolo";
+    if (choice) {
+      if (choice.startsWith("PLAN")) mode = "plan";
+      else if (choice.startsWith("ORCH")) mode = "orchestrator";
+      else mode = "yolo";
+      setMode(mode, ctx);
+    }
+  }
+
   pi.registerCommand("mode", {
     description: "Switch tool mode (yolo, plan, orchestrator)",
     handler: async (args, ctx) => {
-      if (args && args.trim()) {
-        const mode = args.trim().toLowerCase() as Mode;
-        if (!["yolo", "plan", "orchestrator"].includes(mode)) {
-          ctx.ui.notify(`Invalid mode: ${mode}. Use yolo, plan, or orchestrator`, "error");
-          return;
-        }
-        setMode(mode, ctx);
-      } else {
-        // interactive selector
-        const choice = await ctx.ui.select("Select mode:", [
-          "YOLO (full access, no restrictions)",
-          "PLAN (read-only exploration)",
-          "ORCHESTRATOR (delegate via subagents)",
-        ]);
-        let mode: Mode = "yolo";
-        if (choice) {
-          if (choice.startsWith("PLAN")) mode = "plan";
-          else if (choice.startsWith("ORCH")) mode = "orchestrator";
-          else mode = "yolo";
-          setMode(mode, ctx);
-        }
-      }
+      await handleModeCommand(args, ctx);
     },
   });
 
   pi.registerCommand("modes", {
     description: "Alias for /mode",
     handler: async (args, ctx) => {
-      const cmd = pi.getCommand("mode");
-      if (cmd) cmd.handler(args, ctx);
+      await handleModeCommand(args, ctx);
     },
   });
 
@@ -213,7 +276,7 @@ export default function (pi: ExtensionAPI) {
 
   // Inject mode prompt on every provider request (compaction-safe)
   pi.on("before_provider_request", async (event) => {
-    const promptSuffix = MODE_PROMPTS[currentMode];
+    const promptSuffix = modeDefinitions.get(currentMode)?.prompt_suffix;
     if (!promptSuffix) return;
 
     function injectIntoPayload(payload: any, text: string): void {
@@ -243,7 +306,7 @@ ${promptSuffix}`.trim());
 
     applyModeTools(ctx);
     updateStatus(ctx);
-    persistMode(ctx);
+    persistMode();
     ctx.ui.notify(`Mode: ${mode.toUpperCase()}`, "info");
   }
 
@@ -254,12 +317,13 @@ ${promptSuffix}`.trim());
       baselineTools = pi.getAllTools().map((t) => t.name);
     }
 
-    if (currentMode === "plan") {
-      pi.setActiveTools(PLAN_TOOLS as string[]);
-    } else {
-      // yolo or orchestrator — restore full toolset
+    const def = modeDefinitions.get(currentMode);
+    const enabled = def?.enabled_tools;
+    if (enabled === undefined || enabled.length === 0) {
       pi.setActiveTools(baselineTools);
-    }
+    } else {
+      pi.setActiveTools(enabled);
+  }
   }
 
   function updateStatus(ctx: ExtensionContext) {
@@ -291,12 +355,14 @@ ${promptSuffix}`.trim());
     }
   }
 
-  function persistMode(_ctx: ExtensionContext) {
+  function persistMode() {
     pi.appendEntry("mode-state", { mode: currentMode });
   }
 
   // Initialize on session start or resume
   pi.on("session_start", async (_event, ctx) => {
+    // Load markdown mode definitions (Phase 1)
+    await loadAllModes(ctx);
     // capture baseline tool set once
     if (baselineTools.length === 0) {
       baselineTools = pi.getAllTools().map((t) => t.name);
@@ -359,7 +425,7 @@ ${promptSuffix}`.trim());
 
   // Persist after each turn to keep latest
   pi.on("turn_end", async () => {
-    persistMode(/*ctx, can't get here? we don't have ctx but pi.appendEntry doesn't need ctx*/);
+    persistMode();
     // actually pi.appendEntry is independent
     // persistMode already calls pi.appendEntry
   });
