@@ -103,6 +103,44 @@ function isSafeCommand(command: string): boolean {
 }
 
 
+let lastLoadTime = 0;
+
+async function loadUserOverrides(ctx?: ExtensionContext): Promise<void> {
+  try {
+    const fs = (await import("fs")).promises;
+    const path = await import("path");
+    const os = await import("os");
+    const configPath = path.join(os.homedir(), ".pi", "modes", "config.yaml");
+
+    let raw: string;
+    try {
+      raw = await fs.readFile(configPath, "utf-8");
+    } catch (e: any) {
+      if (e.code === "ENOENT") return;
+      throw e;
+    }
+
+    const yaml = (await import("js-yaml")).default;
+    const parsed: any = yaml.load(raw);
+
+    if (parsed && typeof parsed === "object") {
+      for (const [mode, overrides] of Object.entries(parsed)) {
+        const m = mode as Mode;
+        if (modeDefinitions.has(m)) {
+          const def = modeDefinitions.get(m)!;
+          modeDefinitions.set(m, { ...def, ...(overrides as object) });
+        }
+      }
+      console.log(`[pi-modes] Loaded user overrides from ${configPath}`);
+    }
+  } catch (err: any) {
+    if (ctx) {
+      ctx.ui.notify(`Override config load error: ${err.message}`, "warning");
+    }
+    console.error("Failed to load user overrides:", err);
+  }
+}
+
 // Phase 1: markdown-driven mode definitions
 const modeDefinitions = new Map<Mode, ModeDefinition>();
 
@@ -144,7 +182,7 @@ async function loadModeFromDisk(mode: Mode, ctx?: ExtensionContext): Promise<Mod
   }
 }
 
-async function loadAllModes(ctx: ExtensionContext): Promise<void> {
+async function loadAllModes(ctx?: ExtensionContext): Promise<void> {
   const modes: Mode[] = ["yolo", "plan", "orchestrator"];
   for (const mode of modes) {
     const fromDisk = await loadModeFromDisk(mode, ctx);
@@ -157,6 +195,8 @@ async function loadAllModes(ctx: ExtensionContext): Promise<void> {
       // warning already emitted by loadModeFromDisk
     }
   }
+  await loadUserOverrides(ctx);
+  lastLoadTime = Date.now();
 }
 
 export default function (pi: ExtensionAPI) {
@@ -172,7 +212,65 @@ export default function (pi: ExtensionAPI) {
   });
 
   // commands
+  let currentCtx: ExtensionContext | undefined;
+
+  async function reloadAll(ctx: ExtensionContext): Promise<void> {
+    await loadAllModes(ctx);
+    applyModeTools(ctx);
+    updateStatus(ctx);
+    ctx.ui.notify("Mode definitions reloaded", "info");
+  }
+
+  let reloadPending = false;
+  async function checkAndReload(ctx: ExtensionContext): Promise<void> {
+    if (reloadPending) return;
+    reloadPending = true;
+    try {
+      const fs = (await import("fs")).promises;
+      const path = await import("path");
+      const os = await import("os");
+      const baseDir = path.dirname(new URL(import.meta.url).pathname);
+      const modesDir = path.join(baseDir, "..", "modes");
+      const configPath = path.join(os.homedir(), ".pi", "modes", "config.yaml");
+
+      let shouldReload = false;
+
+      try {
+        const st = await fs.stat(configPath);
+        if (st.mtimeMs > lastLoadTime) shouldReload = true;
+      } catch (e) {}
+
+      if (!shouldReload) {
+        try {
+          const files = await fs.readdir(modesDir);
+          for (const file of files) {
+            if (file.endsWith(".md")) {
+              const st = await fs.stat(path.join(modesDir, file));
+              if (st.mtimeMs > lastLoadTime) {
+                shouldReload = true;
+                break;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (shouldReload) {
+        await reloadAll(ctx);
+      }
+    } finally {
+      reloadPending = false;
+    }
+  }
+
   async function handleModeCommand(args: string | undefined, ctx: ExtensionContext): Promise<void> {
+    currentCtx = ctx;
+    // reload subcommand
+    if (args && args.trim().toLowerCase() === "reload") {
+      await reloadAll(ctx);
+      return;
+    }
+
     // status subcommand
     if (args && args.trim().toLowerCase() === "status") {
       await showModeStatus(ctx);
@@ -330,6 +428,7 @@ ${promptSuffix}`.trim());
 
   // Initialize on session start or resume
   pi.on("session_start", async (_event, ctx) => {
+    currentCtx = ctx;
     // Load markdown mode definitions (Phase 1)
     await loadAllModes(ctx);
     // capture baseline tool set once
@@ -393,8 +492,12 @@ ${promptSuffix}`.trim());
   });
 
   // Persist after each turn to keep latest
-  pi.on("turn_end", async () => {
+  pi.on("turn_end", async (_event, ctx) => {
+    currentCtx = ctx || currentCtx;
     persistMode();
+    if (currentCtx) {
+      await checkAndReload(currentCtx);
+    }
   });
 
   async function showModeStatus(ctx: ExtensionContext) {
