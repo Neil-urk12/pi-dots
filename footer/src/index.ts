@@ -7,6 +7,7 @@ import type { ResolvedConfig } from "./config.js";
 import { renderFooter, type FooterInput } from "./renderer.js";
 import { createGitState, type GitStateHandle } from "./git.js";
 import { accumulateTotals } from "./tokens.js";
+import { normalizeThinkingLevel } from "./utils.js";
 
 export default function (pi: ExtensionAPI) {
 	// ── State (closure captures, no module-level globals) ──────────
@@ -189,22 +190,4 @@ export default function (pi: ExtensionAPI) {
 		);
 	}
 
-	// ── Thinking level normalization ───────────────────────────────
-
-	function normalizeThinkingLevel(level: unknown): string | undefined {
-		if (typeof level !== "string") return undefined;
-
-		const normalized = level.toLowerCase();
-		if (normalized === "medium") return "med";
-		if (
-			normalized === "extra-high" ||
-			normalized === "extra_high" ||
-			normalized === "x-high"
-		)
-			return "xhigh";
-		if (["low", "med", "high", "xhigh"].includes(normalized))
-			return normalized;
-
-		return undefined;
-	}
 }
