@@ -37,7 +37,7 @@ pi --extension node_modules/pi-modes/dist/index.js
 - `/mode` — interactive mode picker
 - `/mode yolo|plan|orchestrator` — switch immediately
 - `/modes` — alias for `/mode`
-- `Ctrl+Alt+M` — keyboard shortcut to cycle modes
+- `Ctrl+Shift+M` — cycle modes (yolo → plan → orchestrator)
 
 ### CLI flag
 
