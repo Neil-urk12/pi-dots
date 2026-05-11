@@ -70,7 +70,7 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("session_start", async (_event, ctx) => {
 		await lifecycle.start(ctx);
-		if (lifecycle.loadedError && lifecycle.isEnabled)
+		if (ctx.hasUI && lifecycle.loadedError && lifecycle.isEnabled)
 			ctx.ui.notify(`Config error: ${lifecycle.loadedError}`, "error");
 		if (ctx.hasUI && lifecycle.isEnabled) installFooter(ctx);
 	});
