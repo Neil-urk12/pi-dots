@@ -1,67 +1,52 @@
-import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type {
-	ExtensionAPI,
-	ExtensionContext,
-} from "@earendil-works/pi-coding-agent";
-import { execFile } from "node:child_process";
-import os from "node:os";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
-import { promisify } from "node:util";
+import os from "node:os";
 
-const execFileAsync = promisify(execFile);
-
-import { defaultConfig, loadConfig, type ResolvedConfig } from "./config.js";
+import { loadFooterConfig } from "./config.js";
+import type { ResolvedConfig } from "./config.js";
 import { renderFooter, type FooterInput } from "./renderer.js";
-import type { Totals } from "./segments.js";
-
-type GitState = {
-	inRepo: boolean;
-	branch?: string;
-	dirtyCount: number;
-};
-
-type FooterRuntime = {
-	enabled: boolean;
-	git: GitState;
-	thinkingLevel?: string;
-	refreshTimer?: ReturnType<typeof setTimeout>;
-	requestRender?: () => void;
-	config: ResolvedConfig;
-	configPaths: { global: string; project: string };
-	loadedConfigPaths: string[];
-	configError?: string;
-};
-
-const runtime: FooterRuntime = {
-	enabled: true,
-	git: { inRepo: false, dirtyCount: 0 },
-	config: defaultConfig,
-	configPaths: {
-		global: path.join(os.homedir(), ".pi", "agent", "clean-footer.json"),
-		project: path.join(process.cwd(), ".pi", "clean-footer.json"),
-	},
-	loadedConfigPaths: [],
-};
+import { createGitState, type GitStateHandle } from "./git.js";
+import { accumulateTotals } from "./tokens.js";
 
 export default function (pi: ExtensionAPI) {
+	// ── State (closure captures, no module-level globals) ──────────
+	let config: ResolvedConfig;
+	let loadedConfig: ReturnType<typeof loadFooterConfig>;
+	let thinkingLevel: string | undefined;
+	let git: GitStateHandle | undefined;
+	let footerEnabled = true;
+	let requestRender: () => void = () => {};
+
+	const globalConfigPath = path.join(
+		os.homedir(),
+		".pi",
+		"agent",
+		"clean-footer.json",
+	);
+
+	// ── Commands ───────────────────────────────────────────────────
+
 	pi.registerCommand("footer", {
 		description: "Toggle, refresh, or configure the clean footer",
 		handler: async (args, ctx) => {
 			const command = args.trim();
 
 			if (command === "refresh") {
-				await refreshGit(ctx, true);
-				runtime.requestRender?.();
+				await git?.refresh();
 				if (ctx.hasUI) ctx.ui.notify("Footer refreshed", "info");
 				return;
 			}
 
 			if (command === "reload") {
-				loadRuntimeConfig(ctx.cwd);
-				runtime.enabled = runtime.config.enabled;
-				if (ctx.hasUI && runtime.enabled) installFooter(ctx);
-				if (ctx.hasUI && !runtime.enabled) ctx.ui.setFooter(undefined);
-				runtime.requestRender?.();
+				loadedConfig = loadFooterConfig(
+					globalConfigPath,
+					path.join(ctx.cwd, ".pi", "clean-footer.json"),
+				);
+				config = loadedConfig.config;
+				footerEnabled = config.enabled;
+				if (ctx.hasUI && footerEnabled) installFooter(ctx);
+				if (ctx.hasUI && !footerEnabled) ctx.ui.setFooter(undefined);
+				requestRender();
 				notifyConfigStatus(ctx);
 				return;
 			}
@@ -71,206 +56,155 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			runtime.enabled = !runtime.enabled;
+			// toggle
+			footerEnabled = !footerEnabled;
 			if (!ctx.hasUI) return;
 
-			if (runtime.enabled) {
-				runtime.thinkingLevel = normalizeThinkingLevel(pi.getThinkingLevel?.());
+			if (footerEnabled) {
+				thinkingLevel = normalizeThinkingLevel(pi.getThinkingLevel?.());
 				installFooter(ctx);
-				await refreshGit(ctx, true);
+				await git?.refresh();
 				ctx.ui.notify("Clean footer enabled", "info");
 			} else {
-				clearScheduledRefresh();
+				git?.clear();
 				ctx.ui.setFooter(undefined);
 				ctx.ui.notify("Default footer restored", "info");
 			}
 		},
 	});
 
+	// ── Events ─────────────────────────────────────────────────────
+
 	pi.on("session_start", async (_event, ctx) => {
-		loadRuntimeConfig(ctx.cwd);
-		runtime.enabled = runtime.config.enabled;
-		runtime.thinkingLevel = normalizeThinkingLevel(pi.getThinkingLevel?.());
-		if (!ctx.hasUI || !runtime.enabled) return;
+		loadedConfig = loadFooterConfig(
+			globalConfigPath,
+			path.join(ctx.cwd, ".pi", "clean-footer.json"),
+		);
+		config = loadedConfig.config;
+		thinkingLevel = normalizeThinkingLevel(pi.getThinkingLevel?.());
+		footerEnabled = config.enabled;
+		if (!ctx.hasUI || !footerEnabled) return;
+
 		installFooter(ctx);
-		await refreshGit(ctx, true);
-		if (runtime.configError) notifyConfigStatus(ctx);
+		git = createGitState({
+			cwd: ctx.cwd,
+			debounceMs: config.gitRefreshDebounceMs,
+			enabled: config.showGit,
+			onChange: () => requestRender(),
+		});
+		await git.refresh();
+		if (loadedConfig.error)
+			ctx.ui.notify(`Config error: ${loadedConfig.error}`, "error");
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
-		clearScheduledRefresh();
-		runtime.requestRender = undefined;
+		git?.clear();
+		requestRender = () => {};
 		if (ctx.hasUI) ctx.ui.setFooter(undefined);
 	});
 
 	pi.on("thinking_level_select", (event) => {
-		runtime.thinkingLevel = normalizeThinkingLevel(event.level);
-		runtime.requestRender?.();
+		thinkingLevel = normalizeThinkingLevel(event.level);
+		requestRender();
 	});
 
 	pi.on("model_select", () => {
-		runtime.requestRender?.();
+		requestRender();
 	});
 
 	pi.on("message_end", (event) => {
-		if (event.message.role === "assistant") runtime.requestRender?.();
+		if (event.message.role === "assistant") requestRender();
 	});
 
-	pi.on("tool_execution_end", (event, ctx) => {
+	pi.on("tool_execution_end", (event) => {
 		if (["bash", "edit", "write"].includes(event.toolName))
-			scheduleGitRefresh(ctx);
-		runtime.requestRender?.();
+			git?.schedule();
+		requestRender();
 	});
 
-	pi.on("user_bash", (_event, ctx) => {
-		scheduleGitRefresh(ctx);
+	pi.on("user_bash", () => {
+		git?.schedule();
 	});
-}
 
-// ── Lifecycle ──────────────────────────────────────────────────
+	// ── Lifecycle ──────────────────────────────────────────────────
 
-function installFooter(ctx: ExtensionContext) {
-	if (!ctx.hasUI) return;
+	function installFooter(ctx: ExtensionContext) {
+		if (!ctx.hasUI) return;
 
-	ctx.ui.setFooter((tui, theme) => {
-		runtime.requestRender = () => tui.requestRender();
+		ctx.ui.setFooter((tui, theme) => {
+			requestRender = () => tui.requestRender();
 
-		return {
-			invalidate() {},
-			render(width: number): string[] {
-				const totals = getTotals(ctx);
-				const input: FooterInput = {
-					modelId: ctx.model?.id ?? "no-model",
-					thinkingLevel: runtime.thinkingLevel,
-					directory: path.basename(ctx.cwd),
-					gitBranch: runtime.git.branch,
-					gitDirtyCount: runtime.git.dirtyCount,
-					contextUsed: ctx.getContextUsage?.()?.tokens ?? 0,
-					contextMax: ctx.model?.contextWindow,
-					totals,
-					config: runtime.config,
-				};
-				return renderFooter(input, theme, width);
-			},
-		};
-	});
-}
-
-function loadRuntimeConfig(cwd: string) {
-	const projectPath = path.join(cwd, ".pi", "clean-footer.json");
-	const result = loadConfig([runtime.configPaths.global, projectPath]);
-	runtime.configPaths = {
-		global: runtime.configPaths.global,
-		project: projectPath,
-	};
-	runtime.loadedConfigPaths = result.loadedPaths;
-	runtime.configError = result.error;
-	runtime.config = result.config;
-}
-
-function notifyConfigStatus(ctx: ExtensionContext) {
-	if (!ctx.hasUI) return;
-	if (runtime.configError) {
-		ctx.ui.notify(`Clean footer config error: ${runtime.configError}`, "error");
-		return;
-	}
-	ctx.ui.notify("Clean footer config loaded", "info");
-}
-
-function showConfig(ctx: ExtensionContext) {
-	if (!ctx.hasUI) return;
-	const loaded = runtime.loadedConfigPaths.length
-		? runtime.loadedConfigPaths.join("\n")
-		: "none";
-	ctx.ui.notify(
-		[
-			"Clean footer config",
-			`global: ${runtime.configPaths.global}`,
-			`project: ${runtime.configPaths.project}`,
-			`loaded:\n${loaded}`,
-			runtime.configError ? `error: ${runtime.configError}` : "error: none",
-			`resolved: ${JSON.stringify(runtime.config)}`,
-		].join("\n"),
-		"info",
-	);
-}
-
-// ── Thinking level normalization ───────────────────────────────
-
-function normalizeThinkingLevel(level: unknown): string | undefined {
-	if (typeof level !== "string") return undefined;
-
-	const normalized = level.toLowerCase();
-	if (normalized === "medium") return "med";
-	if (
-		normalized === "extra-high" ||
-		normalized === "extra_high" ||
-		normalized === "x-high"
-	)
-		return "xhigh";
-	if (["low", "med", "high", "xhigh"].includes(normalized)) return normalized;
-
-	return undefined;
-}
-
-// ── Token totals (side-effectful: iterates session) ────────────
-
-function getTotals(ctx: ExtensionContext): Totals {
-	const totals: Totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-
-	for (const entry of ctx.sessionManager.getBranch()) {
-		if (entry.type !== "message" || entry.message.role !== "assistant")
-			continue;
-
-		const message = entry.message as AssistantMessage;
-		totals.input += message.usage?.input ?? 0;
-		totals.output += message.usage?.output ?? 0;
-		totals.cacheRead += message.usage?.cacheRead ?? 0;
-		totals.cacheWrite += message.usage?.cacheWrite ?? 0;
+			return {
+				invalidate() {},
+				render(width: number): string[] {
+					const input: FooterInput = {
+						modelId: ctx.model?.id ?? "no-model",
+						thinkingLevel,
+						directory: path.basename(ctx.cwd),
+						gitBranch: git?.state.branch,
+						gitDirtyCount: git?.state.dirtyCount ?? 0,
+						contextUsed: ctx.getContextUsage?.()?.tokens ?? 0,
+						contextMax: ctx.model?.contextWindow,
+						totals: accumulateTotals(ctx.sessionManager.getBranch()),
+						config,
+					};
+					return renderFooter(input, theme, width);
+				},
+			};
+		});
 	}
 
-	return totals;
-}
+	// ── Config helpers ─────────────────────────────────────────────
 
-// ── Git refresh ────────────────────────────────────────────────
-
-async function refreshGit(ctx: ExtensionContext, immediate = false) {
-	if (!runtime.config.showGit) {
-		runtime.git = { inRepo: false, dirtyCount: 0 };
-		return;
+	function notifyConfigStatus(ctx: ExtensionContext) {
+		if (!ctx.hasUI) return;
+		if (loadedConfig.error) {
+			ctx.ui.notify(
+				`Clean footer config error: ${loadedConfig.error}`,
+				"error",
+			);
+		} else {
+			ctx.ui.notify("Clean footer config loaded", "info");
+		}
 	}
 
-	try {
-		const [branchResult, statusResult] = await Promise.all([
-			execFileAsync("git", ["branch", "--show-current"], {
-				cwd: ctx.cwd,
-				timeout: 2_000,
-			}),
-			execFileAsync("git", ["status", "--porcelain"], {
-				cwd: ctx.cwd,
-				timeout: 2_000,
-			}),
-		]);
-
-		const branch = branchResult.stdout.trim() || "detached";
-		const dirtyCount = statusResult.stdout.split("\n").filter(Boolean).length;
-		runtime.git = { inRepo: true, branch, dirtyCount };
-	} catch {
-		runtime.git = { inRepo: false, dirtyCount: 0 };
+	function showConfig(ctx: ExtensionContext) {
+		if (!ctx.hasUI) return;
+		const loaded = loadedConfig.loadedPaths.length
+			? loadedConfig.loadedPaths.join("\n")
+			: "none";
+		const projectPath = path.join(ctx.cwd, ".pi", "clean-footer.json");
+		ctx.ui.notify(
+			[
+				"Clean footer config",
+				`global: ${globalConfigPath}`,
+				`project: ${projectPath}`,
+				`loaded:\n${loaded}`,
+				loadedConfig.error
+					? `error: ${loadedConfig.error}`
+					: "error: none",
+				`resolved: ${JSON.stringify(config)}`,
+			].join("\n"),
+			"info",
+		);
 	}
 
-	if (immediate) runtime.requestRender?.();
-}
+	// ── Thinking level normalization ───────────────────────────────
 
-function scheduleGitRefresh(ctx: ExtensionContext) {
-	clearScheduledRefresh();
-	runtime.refreshTimer = setTimeout(() => {
-		runtime.refreshTimer = undefined;
-		void refreshGit(ctx, true);
-	}, runtime.config.gitRefreshDebounceMs);
-}
+	function normalizeThinkingLevel(level: unknown): string | undefined {
+		if (typeof level !== "string") return undefined;
 
-function clearScheduledRefresh() {
-	if (runtime.refreshTimer) clearTimeout(runtime.refreshTimer);
-	runtime.refreshTimer = undefined;
+		const normalized = level.toLowerCase();
+		if (normalized === "medium") return "med";
+		if (
+			normalized === "extra-high" ||
+			normalized === "extra_high" ||
+			normalized === "x-high"
+		)
+			return "xhigh";
+		if (["low", "med", "high", "xhigh"].includes(normalized))
+			return normalized;
+
+		return undefined;
+	}
 }
