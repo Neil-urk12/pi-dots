@@ -73,9 +73,9 @@ Requires the subagent extension to be loaded for full delegation capability.
 
 Mode selection persists across sessions. The current mode is stored in session history and restored on startup.
 
-## Markdown Mode Schema
+## Configuration and Customization
 Modes are defined by markdown files in `modes/` with YAML frontmatter:
-```
+```yaml
 mode: yolo|plan|orchestrator
 enabled_tools: []   # empty = all tools; omitted = legacy fallback; non-empty = exact list
 description: "Brief UI description"
@@ -85,6 +85,21 @@ prompt_suffix: |           # system prompt injected before each request
   [MODE: ...]
   instructions...
 ```
+
+### User Overrides
+You can override any mode configuration locally by creating a YAML file at `~/.pi/modes/config.yaml`:
+```yaml
+plan:
+  border_label: " MY PLAN "
+  enabled_tools:
+    - read
+    - bash
+```
+This configuration is merged over the built-in markdown definitions.
+
+### Dynamic Reload
+- Run `/mode reload` to immediately reload the mode definitions and your overrides.
+- The `modes/` directory and your `config.yaml` are auto-watched. Edits trigger an automatic hot-reload when your turn ends.
 
 ## Migration
 v0.2.1 (current): markdown-driven config, tool-level + shell-filtered safety in PLAN.
