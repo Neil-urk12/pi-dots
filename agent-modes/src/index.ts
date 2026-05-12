@@ -98,10 +98,13 @@ const SAFE_PATTERNS = [
   /^\s*eza\b/,
 ] as const;
 
-function isSafeCommand(command: string): boolean {
-  return !DESTRUCTIVE_PATTERNS.some(p => p.test(command)) && SAFE_PATTERNS.some(p => p.test(command));
+function isDestructiveCommand(command: string): boolean {
+  return DESTRUCTIVE_PATTERNS.some(p => p.test(command));
 }
 
+function isSafeCommand(command: string): boolean {
+  return !isDestructiveCommand(command) && SAFE_PATTERNS.some(p => p.test(command));
+}
 
 let lastLoadTime = 0;
 
@@ -188,7 +191,7 @@ async function loadAllModes(ctx?: ExtensionContext): Promise<void> {
   const baseDir = path.dirname(new URL(import.meta.url).pathname);
   const modesDir = path.join(baseDir, "..", "modes");
   
-  const modesToLoad = new Set<string>(["yolo", "plan", "orchestrator"]);
+  const modesToLoad = new Set<string>(["yolo", "plan", "code", "ask", "orchestrator"]);
 
   try {
     const files = await fs.readdir(modesDir);
@@ -219,15 +222,16 @@ async function loadAllModes(ctx?: ExtensionContext): Promise<void> {
   lastLoadTime = Date.now();
 }
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   // internal state
   let currentMode: Mode = "yolo";
   let baselineTools: string[] = [];
   let initialized: boolean = false;
+await loadAllModes();
 
   // CLI flag: --mode <mode>
   pi.registerFlag("mode", {
-    description: "Start in tool mode (e.g. yolo, plan, orchestrator)",
+    description: "Start in tool mode (e.g. yolo, plan, code, ask, orchestrator)",
     type: "string",
   });
 
@@ -325,7 +329,7 @@ export default function (pi: ExtensionAPI) {
   }
 
   pi.registerCommand("mode", {
-    description: "Switch tool mode (yolo, plan, orchestrator)",
+    description: "Switch tool mode (yolo, plan, code, ask, orchestrator)",
     handler: async (args, ctx) => {
       await handleModeCommand(args, ctx);
     },
@@ -340,7 +344,7 @@ export default function (pi: ExtensionAPI) {
 
   // Shortcut: cycle mode
   pi.registerShortcut(Key.ctrlShift("m"), {
-    description: "Cycle modes (yolo → plan → orchestrator)",
+    description: "Cycle modes (yolo → plan → code → ask → orchestrator)",
     handler: async (ctx) => {
       const modes = Array.from(modeDefinitions.keys());
       const curIndex = modes.indexOf(currentMode);
@@ -374,13 +378,50 @@ export default function (pi: ExtensionAPI) {
     injectIntoPayload(event.payload, `\n\n[MODE: ${currentMode.toUpperCase()}]
 ${promptSuffix}`.trim());
   });
-  // Gate bash commands in plan mode
+  // Gate tool access based on mode's enabled_tools, plus bash safety in restricted modes
   pi.on("tool_call", async (event, ctx) => {
-    if (currentMode !== "plan") return;
-    if (event.toolName !== "bash") return;
-    const command = event.input.command as string;
-    if (!isSafeCommand(command)) {
-      return { block: true, reason: `Plan mode blocked command: ${command}\nUse /mode yolo to allow bash execution.` };
+    const def = modeDefinitions.get(currentMode);
+    const allowed = def?.enabled_tools;
+    // Defensive: if mode definition missing (not loaded yet), block editing tools
+    if (!def) {
+      if (["write", "edit", "apply_patch"].includes(event.toolName)) {
+        return {
+          block: true,
+          reason: `Mode '${currentMode}' not initialized — editing blocked`
+        };
+      }
+    }
+
+    // If mode has an explicit allowlist (non-empty), enforce it
+    if (Array.isArray(allowed) && allowed.length > 0) {
+      if (!allowed.includes(event.toolName)) {
+        return {
+          block: true,
+          reason: `${currentMode.toUpperCase()} mode blocks tool: ${event.toolName}. Allowed tools: ${allowed.join(", ")}`
+        };
+      }
+    }
+
+    // Extra safety: in plan/ask mode, gate bash commands by safety
+    if ((currentMode === "plan" || currentMode === "ask") && event.toolName === "bash") {
+      const command = event.input.command as string;
+      if (!isSafeCommand(command)) {
+        return {
+          block: true,
+          reason: `Plan/Ask mode blocked unsafe command: ${command}\nAllowed read-only commands only. Use /mode yolo to enable full bash.`
+        };
+      }
+    }
+
+    // Code mode: block destructive bash commands (allow non-destructive)
+    if (currentMode === "code" && event.toolName === "bash") {
+      const command = event.input.command as string;
+      if (isDestructiveCommand(command)) {
+        return {
+          block: true,
+          reason: `CODE mode blocked destructive command: ${command}\nAllowed development commands only. Switch to YOLO (/mode yolo) if you need this.`
+        };
+      }
     }
   });
 
@@ -403,13 +444,19 @@ ${promptSuffix}`.trim());
       baselineTools = pi.getAllTools().map((t) => t.name);
     }
 
-    const def = modeDefinitions.get(currentMode);
+    let def = modeDefinitions.get(currentMode);
+    // Defensive fallback: during hot-reload or init, modeDefinition may be temporarily missing
+    if (!def) {
+      const legacy = getLegacyConfig(currentMode);
+      if (legacy) def = legacy;
+    }
+
     const enabled = def?.enabled_tools;
     if (enabled === undefined || enabled.length === 0) {
       pi.setActiveTools(baselineTools);
     } else {
       pi.setActiveTools(enabled);
-  }
+    }
   }
 
   function updateStatus(ctx: ExtensionContext) {
@@ -418,9 +465,9 @@ ${promptSuffix}`.trim());
     
     let display = currentMode.toUpperCase();
     // Keep legacy emojis for standard modes
-    if (currentMode === "yolo") display = "⚡YOLO";
-    else if (currentMode === "plan") display = "📋PLAN";
+    if (currentMode === "plan") display = "📋PLAN";
     else if (currentMode === "orchestrator") display = "🤝ORCH";
+    else if (currentMode === "ask") display = "❓ASK";
 
     ctx.ui.setStatus("mode", ctx.ui.theme.fg(style, display));
   }

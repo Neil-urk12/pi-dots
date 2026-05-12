@@ -1,6 +1,6 @@
 # pi-modes
 
-Three-mode extension for the pi coding agent: **YOLO**, **PLAN**, and **ORCHESTRATOR**.
+Multi-mode extension for the pi coding agent: **YOLO**, **PLAN**, **CODE**, **ASK**, and **ORCHESTRATOR**.
 
 ## Installation
 
@@ -36,9 +36,9 @@ pi --extension node_modules/pi-modes/dist/index.js
 
 - `/mode` — interactive mode picker
 - `/mode status` — show current active tools and config
-- `/mode yolo|plan|orchestrator` — switch immediately
+- `/mode yolo|plan|code|ask|orchestrator` — switch immediately
 - `/modes` — alias for `/mode`
-- `Ctrl+Shift+M` — cycle modes (yolo → plan → orchestrator)
+- `Ctrl+Shift+M` — cycle modes (yolo → plan → code → ask → orchestrator)
 
 ### CLI flag
 
@@ -46,6 +46,8 @@ pi --extension node_modules/pi-modes/dist/index.js
 pi --mode plan          # start in plan mode
 pi --mode orchestrator  # start in orchestrator mode
 pi --mode yolo          # start in yolo mode (default)
+pi --mode ask           # start in ask mode
+pi --mode code          # start in code mode
 ```
 
 ## Modes
@@ -61,6 +63,14 @@ Safe exploration mode. Only read-only tools enabled:
 
 Useful for exploring codebases, understanding structure, and planning changes without risk.
 
+### CODE
+Full editing and development tools with destructive command protection. All tools available like YOLO, but bash commands are filtered:
+- Allowed: building, testing, running scripts, read-only git operations
+- Blocked: rm -rf, git push, sudo, npm install, and other destructive command patterns
+- Differences from YOLO: bash protection, safety-focused prompt
+
+Useful for active development with safety net against accidental data loss.
+
 ### ORCHESTRATOR
 Coordination mode. Full tool access, but system prompt encourages:
 - Breaking tasks into subtasks
@@ -69,6 +79,9 @@ Coordination mode. Full tool access, but system prompt encourages:
 
 Requires the subagent extension to be loaded for full delegation capability.
 
+### ASK
+Clarification-first mode. Enabled tools: `read`, `bash`, `grep`, `find`, `ls`, `questionnaire`. Gather requirements before any implementation — no code changes.
+
 ## State persistence
 
 Mode selection persists across sessions. The current mode is stored in session history and restored on startup.
@@ -76,7 +89,7 @@ Mode selection persists across sessions. The current mode is stored in session h
 ## Configuration and Customization
 Modes are defined by markdown files in `modes/` with YAML frontmatter:
 ```yaml
-mode: yolo|plan|orchestrator
+mode: yolo|plan|code|ask|orchestrator
 enabled_tools: []   # empty = all tools; omitted = legacy fallback; non-empty = exact list
 description: "Brief UI description"
 border_label: " LABEL "
