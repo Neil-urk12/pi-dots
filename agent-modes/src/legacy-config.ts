@@ -36,7 +36,7 @@ PRINCIPLES:
 
 const PLAN_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"] as const;
 
-export function getLegacyConfig(mode: "yolo" | "plan" | "orchestrator"): ModeDefinition {
+export function getLegacyConfig(mode: string): ModeDefinition | null {
   if (mode === "plan") {
     return {
       mode: "plan",
@@ -57,13 +57,15 @@ export function getLegacyConfig(mode: "yolo" | "plan" | "orchestrator"): ModeDef
       border_style: "accent",
     };
   }
-  // yolo
-  return {
-    mode: "yolo",
-    enabled_tools: [], // all tools
-    prompt_suffix: MODE_PROMPTS.yolo, // empty string
-    description: "Full unrestricted access. All tools available.",
-    border_label: " YOLO ",
-    border_style: "success",
-  };
+  if (mode === "yolo") {
+    return {
+      mode: "yolo",
+      enabled_tools: [], // all tools
+      prompt_suffix: MODE_PROMPTS.yolo, // empty string
+      description: "Full unrestricted access. All tools available.",
+      border_label: " YOLO ",
+      border_style: "success",
+    };
+  }
+  return null;
 }

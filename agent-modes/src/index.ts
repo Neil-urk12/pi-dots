@@ -4,7 +4,7 @@ import { Key } from "@earendil-works/pi-tui";
 
 import type { ModeDefinition } from "./types.js";
 import { getLegacyConfig } from "./legacy-config.js";
-type Mode = "yolo" | "plan" | "orchestrator";
+type Mode = string;
 
 // Plan mode bash command filtering
 // Destructive command patterns (blocked in plan mode)
@@ -183,16 +183,36 @@ async function loadModeFromDisk(mode: Mode, ctx?: ExtensionContext): Promise<Mod
 }
 
 async function loadAllModes(ctx?: ExtensionContext): Promise<void> {
-  const modes: Mode[] = ["yolo", "plan", "orchestrator"];
-  for (const mode of modes) {
+  const fs = (await import("fs")).promises;
+  const path = await import("path");
+  const baseDir = path.dirname(new URL(import.meta.url).pathname);
+  const modesDir = path.join(baseDir, "..", "modes");
+  
+  const modesToLoad = new Set<string>(["yolo", "plan", "orchestrator"]);
+
+  try {
+    const files = await fs.readdir(modesDir);
+    for (const file of files) {
+      if (file.endsWith(".md")) {
+        modesToLoad.add(file.replace(/\.md$/, ""));
+      }
+    }
+  } catch (e) {
+    // modes dir might not exist
+  }
+
+  modeDefinitions.clear();
+
+  for (const mode of modesToLoad) {
     const fromDisk = await loadModeFromDisk(mode, ctx);
     if (fromDisk) {
       modeDefinitions.set(mode, fromDisk);
       console.log(`[pi-modes] Loaded mode config from modes/${mode}.md`);
     } else {
       const legacy = getLegacyConfig(mode);
-      modeDefinitions.set(mode, legacy);
-      // warning already emitted by loadModeFromDisk
+      if (legacy) {
+        modeDefinitions.set(mode, legacy);
+      }
     }
   }
   await loadUserOverrides(ctx);
@@ -207,7 +227,7 @@ export default function (pi: ExtensionAPI) {
 
   // CLI flag: --mode <mode>
   pi.registerFlag("mode", {
-    description: "Start in tool mode: yolo, plan, or orchestrator",
+    description: "Start in tool mode (e.g. yolo, plan, orchestrator)",
     type: "string",
   });
 
@@ -278,9 +298,9 @@ export default function (pi: ExtensionAPI) {
     }
 
     if (args && args.trim()) {
-      const mode = args.trim().toLowerCase() as Mode;
-      if (!["yolo", "plan", "orchestrator"].includes(mode)) {
-        ctx.ui.notify(`Invalid mode: ${mode}. Use yolo, plan, or orchestrator`, "error");
+      const mode = args.trim().toLowerCase();
+      if (!modeDefinitions.has(mode)) {
+        ctx.ui.notify(`Invalid mode: ${mode}. Available: ${Array.from(modeDefinitions.keys()).join(", ")}`, "error");
         return;
       }
       setMode(mode, ctx);
@@ -288,7 +308,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     // interactive selector with mode descriptions
-    const modes: Mode[] = ["yolo", "plan", "orchestrator"];
+    const modes = Array.from(modeDefinitions.keys());
     const options = modes.map(m => {
       const def = modeDefinitions.get(m);
       const name = m.toUpperCase();
@@ -296,11 +316,10 @@ export default function (pi: ExtensionAPI) {
     });
     const choice = await ctx.ui.select("Select mode:", options);
 
-    let mode: Mode = "yolo";
     if (choice) {
-      if (choice.startsWith("PLAN")) mode = "plan";
-      else if (choice.startsWith("ORCH")) mode = "orchestrator";
-      else mode = "yolo";
+      // Extract the mode name from the choice string
+      const selectedName = choice.split(" — ")[0].toLowerCase();
+      const mode = modes.find(m => m.toLowerCase() === selectedName) || "yolo";
       setMode(mode, ctx);
     }
   }
@@ -323,7 +342,7 @@ export default function (pi: ExtensionAPI) {
   pi.registerShortcut(Key.ctrlShift("m"), {
     description: "Cycle modes (yolo → plan → orchestrator)",
     handler: async (ctx) => {
-      const modes: Mode[] = ["yolo", "plan", "orchestrator"];
+      const modes = Array.from(modeDefinitions.keys());
       const curIndex = modes.indexOf(currentMode);
       const next = modes[(curIndex + 1) % modes.length];
       setMode(next, ctx);
@@ -394,32 +413,16 @@ ${promptSuffix}`.trim());
   }
 
   function updateStatus(ctx: ExtensionContext) {
-    let label: string;
-    let style: "accent" | "warning" | "success" | "muted";
-    let display: string;
+    const def = modeDefinitions.get(currentMode);
+    const style = def?.border_style || "muted";
+    
+    let display = currentMode.toUpperCase();
+    // Keep legacy emojis for standard modes
+    if (currentMode === "yolo") display = "⚡YOLO";
+    else if (currentMode === "plan") display = "📋PLAN";
+    else if (currentMode === "orchestrator") display = "🤝ORCH";
 
-    if (currentMode === "yolo") {
-      label = "⚡YOLO";
-      style = "success";
-      display = label;
-    } else if (currentMode === "plan") {
-      label = "📋PLAN";
-      style = "warning";
-      display = label;
-    } else if (currentMode === "orchestrator") {
-      label = "🤝ORCH";
-      style = "accent";
-      display = label;
-    } else {
-      style = "muted";
-      display = "";
-    }
-
-    if (display) {
-      ctx.ui.setStatus("mode", ctx.ui.theme.fg(style, display));
-    } else {
-      ctx.ui.setStatus("mode", undefined);
-    }
+    ctx.ui.setStatus("mode", ctx.ui.theme.fg(style, display));
   }
 
   function persistMode() {
@@ -438,8 +441,8 @@ ${promptSuffix}`.trim());
 
     // check --mode flag
     const flag = pi.getFlag("mode");
-    if (typeof flag === "string" && ["yolo", "plan", "orchestrator"].includes(flag)) {
-      currentMode = flag as Mode;
+    if (typeof flag === "string" && modeDefinitions.has(flag)) {
+      currentMode = flag;
     } else {
       // restore from previous session if any
       const entries = ctx.sessionManager.getEntries();
@@ -448,8 +451,8 @@ ${promptSuffix}`.trim());
         .pop();
       if (last && "data" in last && last.data && typeof last.data === "object" && "mode" in last.data) {
         const m = (last.data as { mode: string }).mode;
-        if (["yolo", "plan", "orchestrator"].includes(m)) {
-          currentMode = m as Mode;
+        if (modeDefinitions.has(m)) {
+          currentMode = m;
         }
       }
     }
@@ -463,27 +466,24 @@ ${promptSuffix}`.trim());
           const lines = super.render(width);
           if (lines.length === 0) return lines;
 
-          let label: string;
-          switch (currentMode) {
-            case "yolo":
-              label = " YOLO ";
-              break;
-            case "plan":
-              label = " PLAN ";
-              break;
-            case "orchestrator":
-              label = " ORCH ";
-              break;
-            default:
-              label = "";
-          }
+          const def = modeDefinitions.get(currentMode);
+          let label = def?.border_label || ` ${currentMode.toUpperCase()} `;
+          const style = def?.border_style;
 
           if (label && lines.length > 0) {
             const labelWidth = label.length;
             const dashes = "─".repeat(Math.max(0, width - labelWidth));
             const borderText = label + dashes;
-            lines[lines.length - 1] = theme.borderColor(borderText);
+            
+            // Apply custom theme color if specified
+            if (style && style !== "muted" && typeof ctx.ui.theme.fg === "function") {
+               // Use fg color mapped from style, or fallback to borderColor
+               lines[lines.length - 1] = ctx.ui.theme.fg(style, borderText);
+            } else {
+               lines[lines.length - 1] = theme.borderColor(borderText);
+            }
           }
+
           return lines;
         }
       }

@@ -1,5 +1,5 @@
 export interface ModeDefinition {
-  mode: 'yolo' | 'plan' | 'orchestrator';
+  mode: string;
   enabled_tools?: string[];     // tool names to enable; undefined or empty = all tools
   prompt_suffix?: string;       // text injected into system prompt
   description?: string;         // human-readable description for UI
