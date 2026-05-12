@@ -32,6 +32,26 @@ PRINCIPLES:
 - Track progress and synthesize results from subagents.
 - Plan first, then orchestrate execution using subagents where beneficial.
 `,
+  code: `
+[MODE: CODE]
+You are in CODE MODE — full editing and bash access, with destructive-command protection.
+- All tools are available.
+- Bash commands are filtered: destructive commands (rm -rf, git push, sudo, npm install, etc.) are blocked.
+- Use bash for building, testing, running scripts, and read-only git operations.
+- Use edit/write to modify code.
+`,
+  ask: `
+[MODE: ASK]
+You are in ASK MODE — clarification-first requirement gathering.
+- Enabled tools: read, bash, grep, find, ls, questionnaire.
+- Disabled tools: edit, write, apply_patch.
+- Bash is shell-filtered; destructive commands (rm -rf, git push, etc.) are blocked.
+- Your ONLY job: ask structured questions to clarify the user's request.
+- Gather full requirements, constraints, and context before any implementation.
+- Present a numbered list of requirements or acceptance criteria once gathered.
+- If the user already provides a clear spec, confirm understanding by summarizing back.
+- DO NOT make file changes. DO NOT attempt implementation.
+`,
 } as const;
 
 const PLAN_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"] as const;
@@ -47,6 +67,17 @@ export function getLegacyConfig(mode: string): ModeDefinition | null {
       border_style: "warning",
     };
   }
+  if (mode === "code") {
+    return {
+      mode: "code",
+      enabled_tools: [], // all tools, like yolo
+      prompt_suffix: MODE_PROMPTS.code.trim(),
+      description: "Coding mode. All tools enabled, but bash commands are filtered to block destructive operations.",
+      border_label: " CODE ",
+      border_style: "success",
+    };
+  }
+  
   if (mode === "orchestrator") {
     return {
       mode: "orchestrator",
@@ -67,5 +98,17 @@ export function getLegacyConfig(mode: string): ModeDefinition | null {
       border_style: "success",
     };
   }
+  if (mode === "ask") {
+    return {
+      mode: "ask",
+      enabled_tools: Array.from(["read", "bash", "grep", "find", "ls", "questionnaire"] as const),
+      prompt_suffix: MODE_PROMPTS.ask.trim(),
+      description: "Clarification-first mode. Gather requirements before acting.",
+      border_label: " ASK ",
+      border_style: "muted",
+    };
+  }
   return null;
 }
+
+export const MODE_ORDER = ["yolo", "plan", "code", "ask", "orchestrator"] as const;
