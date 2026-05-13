@@ -1,5 +1,6 @@
 ---
 mode: orchestrator
+bash_policy: off
 enabled_tools: []  # empty = all tools
 description: "Coordination mode. Delegates tasks to subagents."
 border_label: " ORCH "

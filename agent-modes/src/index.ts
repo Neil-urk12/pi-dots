@@ -5,108 +5,10 @@ import { Key } from "@earendil-works/pi-tui";
 import { loadAllModes, notifyModeCatalogDiagnostics, type ModeCatalog } from "./mode-catalog.js";
 import { ModeRuntimeController, type ModeRuntimeEffects } from "./mode-runtime.js";
 import { injectIntoPayload } from "./payload-injection.js";
+import { evaluateToolCall } from "./mode-tool-policy.js";
 
 type Mode = string;
 
-// Plan mode bash command filtering
-// Destructive command patterns (blocked in plan mode)
-const DESTRUCTIVE_PATTERNS = [
-  /\brm\b/i,
-  /\brmdir\b/i,
-  /\bmv\b/i,
-  /\bcp\b/i,
-  /\bmkdir\b/i,
-  /\btouch\b/i,
-  /\bchmod\b/i,
-  /\bchown\b/i,
-  /\bchgrp\b/i,
-  /\bln\b/i,
-  /\btee\b/i,
-  /\btruncate\b/i,
-  /\bdd\b/i,
-  /\bshred\b/i,
-  /(^|[^<])>(?!>)/, // single redirect
-  />>/, // append redirect
-  /\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
-  /\byarn\s+(add|remove|install|publish)/i,
-  /\bpnpm\s+(add|remove|install|publish)/i,
-  /\bpip\s+(install|uninstall)/i,
-  /\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
-  /\bbrew\s+(install|uninstall|upgrade)/i,
-  /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)/i,
-  /\bsudo\b/i,
-  /\bsu\b/i,
-  /\bkill\b/i,
-  /\bpkill\b/i,
-  /\bkillall\b/i,
-  /\breboot\b/i,
-  /\bshutdown\b/i,
-  /\bsystemctl\s+(start|stop|restart|enable|disable)/i,
-  /\bservice\s+\S+\s+(start|stop|restart)/i,
-  /\b(vim?|nano|emacs|code|subl)\b/i,
-] as const;
-
-// Safe read-only command allowlist (plan mode)
-const SAFE_PATTERNS = [
-  /^\s*cat\b/,
-  /^\s*head\b/,
-  /^\s*tail\b/,
-  /^\s*less\b/,
-  /^\s*more\b/,
-  /^\s*grep\b/,
-  /^\s*find\b/,
-  /^\s*ls\b/,
-  /^\s*pwd\b/,
-  /^\s*echo\b/,
-  /^\s*printf\b/,
-  /^\s*wc\b/,
-  /^\s*sort\b/,
-  /^\s*uniq\b/,
-  /^\s*diff\b/,
-  /^\s*file\b/,
-  /^\s*stat\b/,
-  /^\s*du\b/,
-  /^\s*df\b/,
-  /^\s*tree\b/,
-  /^\s*which\b/,
-  /^\s*whereis\b/,
-  /^\s*type\b/,
-  /^\s*env\b/,
-  /^\s*printenv\b/,
-  /^\s*uname\b/,
-  /^\s*whoami\b/,
-  /^\s*id\b/,
-  /^\s*date\b/,
-  /^\s*cal\b/,
-  /^\s*uptime\b/,
-  /^\s*ps\b/,
-  /^\s*top\b/,
-  /^\s*htop\b/,
-  /^\s*free\b/,
-  /^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)/i,
-  /^\s*git\s+ls-/i,
-  /^\s*npm\s+(list|ls|view|info|search|outdated|audit)/i,
-  /^\s*yarn\s+(list|info|why|audit)/i,
-  /^\s*node\s+--version/i,
-  /^\s*python\s+--version/i,
-  /^\s*curl\s/i,
-  /^\s*wget\s+-O\s*-/i,
-  /^\s*jq\b/,
-  /^\s*sed\s+-n/i,
-  /^\s*awk\b/,
-  /^\s*rg\b/,
-  /^\s*fd\b/,
-  /^\s*bat\b/,
-  /^\s*eza\b/,
-] as const;
-
-function isDestructiveCommand(command: string): boolean {
-  return DESTRUCTIVE_PATTERNS.some(p => p.test(command));
-}
-
-function isSafeCommand(command: string): boolean {
-  return !isDestructiveCommand(command) && SAFE_PATTERNS.some(p => p.test(command));
-}
 
 async function loadInitialModeCatalog(ctx?: ExtensionContext): Promise<ModeCatalog | undefined> {
   const result = await loadAllModes();
@@ -298,51 +200,21 @@ export default async function (pi: ExtensionAPI) {
     return injectIntoPayload(event.payload, injection);
   });
 
-  // Gate tool access based on mode's enabled_tools, plus bash safety in restricted modes
-  pi.on("tool_call", async (event, ctx) => {
+  // Gate tool access based on mode policy module
+  pi.on("tool_call", async (event, _ctx) => {
     const mode = currentMode();
-    const def = runtime?.definition();
-    const allowed = def?.enabled_tools;
-    // Defensive: if mode definition missing (not loaded yet), block editing tools
-    if (!def) {
-      if (["write", "edit", "apply_patch"].includes(event.toolName)) {
-        return {
-          block: true,
-          reason: `Mode '${mode}' not initialized — editing blocked`
-        };
-      }
-    }
+    const decision = evaluateToolCall({
+      mode,
+      definition: runtime?.definition(),
+      toolName: event.toolName,
+      input: event.input,
+    });
 
-    // If mode has an explicit allowlist (non-empty), enforce it
-    if (Array.isArray(allowed) && allowed.length > 0) {
-      if (!allowed.includes(event.toolName)) {
-        return {
-          block: true,
-          reason: `${mode.toUpperCase()} mode blocks tool: ${event.toolName}. Allowed tools: ${allowed.join(", ")}`
-        };
-      }
-    }
-
-    // Extra safety: in plan/ask mode, gate bash commands by safety
-    if ((mode === "plan" || mode === "ask") && event.toolName === "bash") {
-      const command = event.input.command as string;
-      if (!isSafeCommand(command)) {
-        return {
-          block: true,
-          reason: `Plan/Ask mode blocked unsafe command: ${command}\nAllowed read-only commands only. Use /mode yolo to enable full bash.`
-        };
-      }
-    }
-
-    // Code mode: block destructive bash commands (allow non-destructive)
-    if (mode === "code" && event.toolName === "bash") {
-      const command = event.input.command as string;
-      if (isDestructiveCommand(command)) {
-        return {
-          block: true,
-          reason: `CODE mode blocked destructive command: ${command}\nAllowed development commands only. Switch to YOLO (/mode yolo) if you need this.`
-        };
-      }
+    if (decision.block) {
+      return {
+        block: true,
+        reason: decision.reason,
+      };
     }
   });
 

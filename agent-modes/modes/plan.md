@@ -1,5 +1,6 @@
 ---
 mode: plan
+bash_policy: strict_readonly
 enabled_tools:
   - read
   - bash

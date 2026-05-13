@@ -38,16 +38,24 @@ function validateModeDefinition(parsed: any, expectedMode: string, file: string)
   if (parsed.mode !== expectedMode) {
     throw new Error(`Mode field '${parsed.mode}' does not match filename '${expectedMode}'`);
   }
-  if (parsed.enabled_tools !== undefined && !Array.isArray(parsed.enabled_tools)) {
-    throw new Error("enabled_tools must be an array when present");
+  if (parsed.enabled_tools !== undefined) {
+    if (!Array.isArray(parsed.enabled_tools)) {
+      throw new Error("enabled_tools must be an array when present");
+    }
+    if (!parsed.enabled_tools.every((tool: unknown) => typeof tool === "string")) {
+      throw new Error("enabled_tools must contain only strings");
+    }
+  }
+  if (parsed.bash_policy !== undefined && !["strict_readonly", "non_destructive", "off"].includes(parsed.bash_policy)) {
+    throw new Error("bash_policy must be one of strict_readonly, non_destructive, off");
   }
   if (parsed.border_style !== undefined && !["accent", "warning", "success", "muted"].includes(parsed.border_style)) {
     throw new Error("border_style must be one of accent, warning, success, muted");
   }
-
   return {
     mode: parsed.mode,
     enabled_tools: parsed.enabled_tools,
+    bash_policy: parsed.bash_policy,
     prompt_suffix: parsed.prompt_suffix,
     description: parsed.description,
     border_label: parsed.border_label,

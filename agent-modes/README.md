@@ -58,15 +58,14 @@ Full unrestricted access. All tools available. No additional restrictions.
 ### PLAN (read-only)
 Safe exploration mode. Only read-only tools enabled:
 - Allowed tools: `read`, `bash`, `grep`, `find`, `ls`, `questionnaire`
-- Bash is shell-filtered: destructive commands (rm, git push, npm install, etc.) are blocked by the extension.
+- Bash policy: `strict_readonly` (read-only command safelist)
 - edit/write/apply_patch are disabled by the harness
 
 Useful for exploring codebases, understanding structure, and planning changes without risk.
 
 ### CODE
-Full editing and development tools with destructive command protection. All tools available like YOLO, but bash commands are filtered:
-- Allowed: building, testing, running scripts, read-only git operations
-- Blocked: rm -rf, git push, sudo, npm install, and other destructive command patterns
+Full editing and development tools with non-destructive command protection. All tools available like YOLO, but bash commands are filtered:
+- Bash policy: `non_destructive` (blocks rm -rf, git push, sudo, npm install, redirects, etc.)
 - Differences from YOLO: bash protection, safety-focused prompt
 
 Useful for active development with safety net against accidental data loss.
@@ -80,7 +79,7 @@ Coordination mode. Full tool access, but system prompt encourages:
 Requires the subagent extension to be loaded for full delegation capability.
 
 ### ASK
-Clarification-first mode. Enabled tools: `read`, `bash`, `grep`, `find`, `ls`, `questionnaire`. Gather requirements before any implementation — no code changes.
+Clarification-first mode. Enabled tools: `read`, `bash`, `grep`, `find`, `ls`, `questionnaire`. Bash policy is `strict_readonly`. Gather requirements before any implementation — no code changes.
 
 ## State persistence
 
@@ -90,8 +89,8 @@ Mode selection persists across sessions. The current mode is stored in session h
 Modes are defined by markdown files in `modes/` with YAML frontmatter:
 ```yaml
 mode: yolo|plan|code|ask|orchestrator
-enabled_tools: []   # empty = all tools; omitted = legacy fallback; non-empty = exact list
-description: "Brief UI description"
+enabled_tools: []   # empty = all tools; omitted/empty = baseline tools; non-empty = exact list
+bash_policy: strict_readonly|non_destructive|off
 border_label: " LABEL "
 border_style: accent|warning|success|muted
 prompt_suffix: |           # system prompt injected before each request
@@ -107,6 +106,7 @@ plan:
   enabled_tools:
     - read
     - bash
+  bash_policy: strict_readonly
 ```
 This configuration is merged over the built-in markdown definitions.
 
@@ -114,8 +114,8 @@ This configuration is merged over the built-in markdown definitions.
 - Run `/mode reload` to immediately reload the mode definitions and your overrides.
 - The `modes/` directory and your `config.yaml` are auto-watched. Edits trigger an automatic hot-reload when your turn ends.
 
-## Migration
-v0.2.1 (current): markdown-driven config, tool-level + shell-filtered safety in PLAN.
+v0.2.2 (current): markdown-driven config with mode-specific `bash_policy`, enforced via `mode-tool-policy`.
+v0.2.1: markdown-driven config, initial shell-filtered safety in PLAN.
 v0.1.x → v0.2.x: replace extension files; modes/*.md included; no config migration needed.
 ## Development
 
