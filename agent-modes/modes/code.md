@@ -1,5 +1,6 @@
 ---
 mode: code
+bash_policy: non_destructive
 enabled_tools: []  # empty = all tools like YOLO
 description: "Coding mode. All tools enabled, but bash commands are filtered to block destructive operations."
 border_label: " CODE "
