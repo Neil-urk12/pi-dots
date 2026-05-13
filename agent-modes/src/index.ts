@@ -18,7 +18,7 @@ async function loadInitialModeCatalog(ctx?: ExtensionContext): Promise<ModeCatal
   }
 
   if (ctx) notifyModeCatalogDiagnostics(ctx, result.diagnostics);
-  console.error("[pi-modes] Failed to load required mode definitions", result.diagnostics);
+  console.error("[pi-agent-modes] Failed to load required mode definitions", result.diagnostics);
   return undefined;
 }
 
