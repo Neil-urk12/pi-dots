@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Key } from "@earendil-works/pi-tui";
 
 import type { ModeDefinition } from "./types.js";
-import { getLegacyConfig } from "./legacy-config.js";
+import { loadAllModes, notifyModeCatalogDiagnostics, type ModeCatalog } from "./mode-catalog.js";
 type Mode = string;
 
 // Plan mode bash command filtering
@@ -106,120 +106,31 @@ function isSafeCommand(command: string): boolean {
   return !isDestructiveCommand(command) && SAFE_PATTERNS.some(p => p.test(command));
 }
 
+let activeCatalog: ModeCatalog | null = null;
 let lastLoadTime = 0;
-
-async function loadUserOverrides(ctx?: ExtensionContext): Promise<void> {
-  try {
-    const fs = (await import("fs")).promises;
-    const path = await import("path");
-    const os = await import("os");
-    const configPath = path.join(os.homedir(), ".pi", "modes", "config.yaml");
-
-    let raw: string;
-    try {
-      raw = await fs.readFile(configPath, "utf-8");
-    } catch (e: any) {
-      if (e.code === "ENOENT") return;
-      throw e;
-    }
-
-    const yaml = (await import("js-yaml")).default;
-    const parsed: any = yaml.load(raw);
-
-    if (parsed && typeof parsed === "object") {
-      for (const [mode, overrides] of Object.entries(parsed)) {
-        const m = mode as Mode;
-        if (modeDefinitions.has(m)) {
-          const def = modeDefinitions.get(m)!;
-          modeDefinitions.set(m, { ...def, ...(overrides as object) });
-        }
-      }
-      console.log(`[pi-modes] Loaded user overrides from ${configPath}`);
-    }
-  } catch (err: any) {
-    if (ctx) {
-      ctx.ui.notify(`Override config load error: ${err.message}`, "warning");
-    }
-    console.error("Failed to load user overrides:", err);
-  }
-}
 
 // Phase 1: markdown-driven mode definitions
 const modeDefinitions = new Map<Mode, ModeDefinition>();
 
-async function loadModeFromDisk(mode: Mode, ctx?: ExtensionContext): Promise<ModeDefinition | null> {
-  try {
-    const fs = (await import("fs")).promises;
-    const path = await import("path");
-    const baseDir = path.dirname(new URL(import.meta.url).pathname);
-    const filePath = path.join(baseDir, "..", "modes", `${mode}.md`);
-    const raw = await fs.readFile(filePath, "utf-8");
-    // Parse YAML frontmatter
-    const frontmatterMatch = raw.match(/^---\s*\n([\s\S]*?)\n---/);
-    if (!frontmatterMatch) {
-      throw new Error("No YAML frontmatter found");
-    }
-    const yamlStr = frontmatterMatch[1];
-    const yaml = (await import("js-yaml")).default;
-    const parsed: any = yaml.load(yamlStr);
-
-    if (parsed.mode !== mode) {
-      throw new Error(`Mode field '${parsed.mode}' does not match filename '${mode}'`);
-    }
-
-    const def: ModeDefinition = {
-      mode: parsed.mode,
-      enabled_tools: parsed.enabled_tools,
-      prompt_suffix: parsed.prompt_suffix,
-      description: parsed.description,
-      border_label: parsed.border_label,
-      border_style: parsed.border_style,
-    };
-    return def;
-  } catch (err: any) {
-    if (ctx) {
-      ctx.ui.notify(`Mode '${mode}' config load error: ${err.message}`, "warning");
-    }
-    console.error(`Failed to load mode '${mode}' from disk:`, err);
-    return null;
+function replaceActiveCatalog(catalog: ModeCatalog): void {
+  activeCatalog = catalog;
+  modeDefinitions.clear();
+  for (const [mode, definition] of catalog.definitions) {
+    modeDefinitions.set(mode, definition);
   }
+  lastLoadTime = catalog.loadedAt;
 }
 
-async function loadAllModes(ctx?: ExtensionContext): Promise<void> {
-  const fs = (await import("fs")).promises;
-  const path = await import("path");
-  const baseDir = path.dirname(new URL(import.meta.url).pathname);
-  const modesDir = path.join(baseDir, "..", "modes");
-  
-  const modesToLoad = new Set<string>(["yolo", "plan", "code", "ask", "orchestrator"]);
-
-  try {
-    const files = await fs.readdir(modesDir);
-    for (const file of files) {
-      if (file.endsWith(".md")) {
-        modesToLoad.add(file.replace(/\.md$/, ""));
-      }
-    }
-  } catch (e) {
-    // modes dir might not exist
+async function loadInitialModeCatalog(ctx?: ExtensionContext): Promise<void> {
+  const result = await loadAllModes();
+  if (result.ok) {
+    replaceActiveCatalog(result.catalog);
+    if (ctx) notifyModeCatalogDiagnostics(ctx, result.diagnostics);
+    return;
   }
 
-  modeDefinitions.clear();
-
-  for (const mode of modesToLoad) {
-    const fromDisk = await loadModeFromDisk(mode, ctx);
-    if (fromDisk) {
-      modeDefinitions.set(mode, fromDisk);
-      console.log(`[pi-modes] Loaded mode config from modes/${mode}.md`);
-    } else {
-      const legacy = getLegacyConfig(mode);
-      if (legacy) {
-        modeDefinitions.set(mode, legacy);
-      }
-    }
-  }
-  await loadUserOverrides(ctx);
-  lastLoadTime = Date.now();
+  if (ctx) notifyModeCatalogDiagnostics(ctx, result.diagnostics);
+  console.error("[pi-modes] Failed to load required mode definitions", result.diagnostics);
 }
 
 export default async function (pi: ExtensionAPI) {
@@ -227,7 +138,7 @@ export default async function (pi: ExtensionAPI) {
   let currentMode: Mode = "yolo";
   let baselineTools: string[] = [];
   let initialized: boolean = false;
-await loadAllModes();
+  await loadInitialModeCatalog();
 
   // CLI flag: --mode <mode>
   pi.registerFlag("mode", {
@@ -239,10 +150,18 @@ await loadAllModes();
   let currentCtx: ExtensionContext | undefined;
 
   async function reloadAll(ctx: ExtensionContext): Promise<void> {
-    await loadAllModes(ctx);
-    applyModeTools(ctx);
-    updateStatus(ctx);
-    ctx.ui.notify("Mode definitions reloaded", "info");
+    const result = await loadAllModes();
+    if (result.ok) {
+      replaceActiveCatalog(result.catalog);
+      notifyModeCatalogDiagnostics(ctx, result.diagnostics);
+      applyModeTools(ctx);
+      updateStatus(ctx);
+      ctx.ui.notify("Mode definitions reloaded", "info");
+      return;
+    }
+
+    notifyModeCatalogDiagnostics(ctx, result.diagnostics);
+    ctx.ui.notify(activeCatalog ? "Mode reload failed; keeping previous known-good catalog" : "Mode reload failed; no known-good catalog loaded", activeCatalog ? "warning" : "error");
   }
 
   let reloadPending = false;
@@ -444,12 +363,7 @@ ${promptSuffix}`.trim());
       baselineTools = pi.getAllTools().map((t) => t.name);
     }
 
-    let def = modeDefinitions.get(currentMode);
-    // Defensive fallback: during hot-reload or init, modeDefinition may be temporarily missing
-    if (!def) {
-      const legacy = getLegacyConfig(currentMode);
-      if (legacy) def = legacy;
-    }
+    const def = modeDefinitions.get(currentMode);
 
     const enabled = def?.enabled_tools;
     if (enabled === undefined || enabled.length === 0) {
@@ -480,7 +394,7 @@ ${promptSuffix}`.trim());
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
     // Load markdown mode definitions (Phase 1)
-    await loadAllModes(ctx);
+    await loadInitialModeCatalog(ctx);
     // capture baseline tool set once
     if (baselineTools.length === 0) {
       baselineTools = pi.getAllTools().map((t) => t.name);
