@@ -3,9 +3,28 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadAllModes } from "../dist/mode-catalog.js";
+import { buildModeCatalog, loadAllModes } from "../dist/mode-catalog.js";
 
 const requiredModes = ["yolo", "plan", "code", "ask", "orchestrator"];
+
+function parsedMode(mode, overrides = {}) {
+  return {
+    mode,
+    file: `${mode}.md`,
+    parsed: {
+      mode,
+      enabled_tools: [],
+      description: mode,
+      border_style: "muted",
+      prompt_suffix: "",
+      ...overrides,
+    },
+  };
+}
+
+function parsedRequiredModes() {
+  return requiredModes.map((mode) => parsedMode(mode));
+}
 
 async function makeFixture() {
   const root = await mkdtemp(join(tmpdir(), "pi-modes-catalog-"));
@@ -16,6 +35,39 @@ async function makeFixture() {
   }
   return { root, modesDir, userConfigPath: join(root, "config.yaml"), cleanup: () => rm(root, { recursive: true, force: true }) };
 }
+
+test("buildModeCatalog builds catalog from parsed documents without file system", () => {
+  const result = buildModeCatalog({
+    modeDocuments: [...parsedRequiredModes(), parsedMode("review", { enabled_tools: ["read"] })],
+    fileForMode: (mode) => `/modes/${mode}.md`,
+    now: () => 456,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.catalog.loadedAt, 456);
+  assert.deepEqual([...result.catalog.definitions.keys()].sort(), [...requiredModes, "review"].sort());
+  assert.deepEqual(result.catalog.definitions.get("review").enabled_tools, ["read"]);
+});
+
+test("buildModeCatalog preserves current permissive user override semantics", () => {
+  const result = buildModeCatalog({
+    modeDocuments: parsedRequiredModes(),
+    userOverrides: {
+      file: "config.yaml",
+      parsed: {
+        plan: { border_label: " SAFE ", border_style: "custom-style" },
+        ask: [],
+        unknown: { border_label: " NOPE " },
+      },
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.catalog.definitions.get("plan").border_label, " SAFE ");
+  assert.equal(result.catalog.definitions.get("plan").border_style, "custom-style");
+  assert.match(result.diagnostics.map(d => d.message).join("\n"), /Unknown user override ignored: unknown/);
+  assert.match(result.diagnostics.map(d => d.message).join("\n"), /User override for 'ask' must be an object/);
+});
 
 test("loads required built-ins plus extra markdown modes", async () => {
   const fx = await makeFixture();
