@@ -1,11 +1,11 @@
-# pi-modes
+# pi-agent-modes
 
 Multi-mode extension for the pi coding agent: **YOLO**, **PLAN**, **CODE**, **ASK**, and **ORCHESTRATOR**.
 
 ## Installation
 
 ```bash
-npm install pi-modes
+npm install @neilurk12/pi-agent-modes
 ```
 
 Or link for local development:
@@ -23,13 +23,13 @@ Place the extension in pi's extensions directory:
 ```bash
 # After npm install, pi will auto-discover from node_modules
 # Or symlink/copy to ~/.pi/agent/extensions/
-ln -s $(npm root)/pi-modes/dist/index.js ~/.pi/agent/extensions/modes.js
+ln -s $(npm root)/@neilurk12/pi-agent-modes/dist/index.js ~/.pi/agent/extensions/modes.js
 ```
 
 Or load directly:
 
 ```bash
-pi --extension node_modules/pi-modes/dist/index.js
+pi --extension node_modules/@neilurk12/pi-agent-modes/dist/index.js
 ```
 
 ### Switching modes
