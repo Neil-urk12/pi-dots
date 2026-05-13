@@ -4,6 +4,7 @@ import { Key } from "@earendil-works/pi-tui";
 
 import { loadAllModes, notifyModeCatalogDiagnostics, type ModeCatalog } from "./mode-catalog.js";
 import { ModeRuntimeController, type ModeRuntimeEffects } from "./mode-runtime.js";
+import { injectIntoPayload } from "./payload-injection.js";
 
 type Mode = string;
 
@@ -294,23 +295,7 @@ export default async function (pi: ExtensionAPI) {
     const injection = modePromptInjection();
     if (!injection) return;
 
-    function injectIntoPayload(payload: any, text: string): void {
-      if (typeof payload.system === "string") {
-        payload.system += text;
-      } else if (Array.isArray(payload.system)) {
-        payload.system.push({ type: "text", text });
-      } else if (Array.isArray(payload.messages)) {
-        const sysMsg = payload.messages.find((m: any) => m.role === "system");
-        if (sysMsg) {
-          if (typeof sysMsg.content === "string") sysMsg.content += text;
-          else if (Array.isArray(sysMsg.content)) sysMsg.content.push({ type: "text", text });
-        } else {
-          payload.messages.unshift({ role: "system", content: text });
-        }
-      }
-    }
-
-    injectIntoPayload(event.payload, injection);
+    return injectIntoPayload(event.payload, injection);
   });
 
   // Gate tool access based on mode's enabled_tools, plus bash safety in restricted modes
