@@ -282,11 +282,17 @@ export default async function (pi: ExtensionAPI) {
     },
   });
 
-  // Inject mode prompt on every provider request (compaction-safe)
-  pi.on("before_provider_request", async (event) => {
+  function modePromptInjection(): string | undefined {
     const mode = currentMode();
     const promptSuffix = runtime?.currentPromptSuffix();
-    if (!promptSuffix) return;
+    if (!promptSuffix) return undefined;
+    return `\n\n[MODE: ${mode.toUpperCase()}]\n${promptSuffix}`;
+  }
+
+  // Inject mode prompt on every provider request (compaction-safe).
+  pi.on("before_provider_request", async (event) => {
+    const injection = modePromptInjection();
+    if (!injection) return;
 
     function injectIntoPayload(payload: any, text: string): void {
       if (typeof payload.system === "string") {
@@ -304,8 +310,7 @@ export default async function (pi: ExtensionAPI) {
       }
     }
 
-    injectIntoPayload(event.payload, `\n\n[MODE: ${mode.toUpperCase()}]
-${promptSuffix}`.trim());
+    injectIntoPayload(event.payload, injection);
   });
 
   // Gate tool access based on mode's enabled_tools, plus bash safety in restricted modes
