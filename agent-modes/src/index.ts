@@ -3,7 +3,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { Key } from "@earendil-works/pi-tui";
 
 import { loadAllModes, notifyModeCatalogDiagnostics, type ModeCatalog } from "./mode-catalog.js";
-import { ModeRuntimeController, type ModeRuntimeEffects } from "./mode-runtime.js";
+import { ModeRuntimeController, type ModeRuntimeDecision } from "./mode-runtime.js";
 import { injectIntoPayload } from "./payload-injection.js";
 import { evaluateToolCall } from "./mode-tool-policy.js";
 
@@ -42,25 +42,25 @@ export default async function (pi: ExtensionAPI) {
     return runtime?.modes() ?? [];
   }
 
-  function applyEffects(effects?: ModeRuntimeEffects): void {
-    if (!effects) return;
-    pi.setActiveTools(effects.activeTools);
-    if (effects.persist) persistMode();
+  function applyDecision(decision: ModeRuntimeDecision | undefined, ctx?: ExtensionContext): void {
+    if (!decision) return;
+    pi.setActiveTools(decision.activeTools);
+    if (decision.persistModeState) persistMode();
+    if (ctx && decision.notifications.length > 0) {
+      for (const item of decision.notifications) {
+        ctx.ui.notify(item.message, item.level);
+      }
+    }
   }
 
   async function reloadAll(ctx: ExtensionContext): Promise<void> {
     const result = await loadAllModes();
     if (result.ok) {
       if (!runtime) runtime = new ModeRuntimeController(result.catalog);
-      const reload = runtime.acceptCatalog(result.catalog);
+      const decision = runtime.transition({ type: "mode_reload_result", catalog: result.catalog });
       notifyModeCatalogDiagnostics(ctx, result.diagnostics);
-      applyEffects(reload.effects);
+      applyDecision(decision, ctx);
       updateStatus(ctx);
-      if (reload.fallbackMode) {
-        ctx.ui.notify(`Mode definitions reloaded; current mode missing, fell back to ${reload.fallbackMode.toUpperCase()}`, "warning");
-      } else {
-        ctx.ui.notify("Mode definitions reloaded", "info");
-      }
       return;
     }
 
@@ -128,14 +128,14 @@ export default async function (pi: ExtensionAPI) {
     }
 
     if (command) {
-      const result = runtime.setMode(command);
-      if (!result.ok) {
-        ctx.ui.notify(result.error ?? `Invalid mode: ${command}`, "error");
+      const decision = runtime.transition({ type: "mode_select", requestedMode: command });
+      if (decision.error) {
+        ctx.ui.notify(decision.error, "error");
         return;
       }
-      applyEffects(result.effects);
+      applyDecision(decision, ctx);
       updateStatus(ctx);
-      if (result.effects?.modeChanged) ctx.ui.notify(`Mode: ${command.toUpperCase()}`, "info");
+      if (decision.modeChanged) ctx.ui.notify(`Mode: ${command.toUpperCase()}`, "info");
       return;
     }
 
@@ -150,11 +150,11 @@ export default async function (pi: ExtensionAPI) {
     if (choice) {
       const selectedName = choice.split(" — ")[0].toLowerCase();
       const mode = modes.find(m => m.toLowerCase() === selectedName) || "yolo";
-      const result = runtime.setMode(mode);
-      if (result.ok) {
-        applyEffects(result.effects);
+      const decision = runtime.transition({ type: "mode_select", requestedMode: mode });
+      if (!decision.error) {
+        applyDecision(decision, ctx);
         updateStatus(ctx);
-        if (result.effects?.modeChanged) ctx.ui.notify(`Mode: ${mode.toUpperCase()}`, "info");
+        if (decision.modeChanged) ctx.ui.notify(`Mode: ${mode.toUpperCase()}`, "info");
       }
     }
   }
@@ -178,10 +178,10 @@ export default async function (pi: ExtensionAPI) {
     description: "Cycle modes (yolo → plan → code → ask → orchestrator)",
     handler: async (ctx) => {
       if (!runtime) return;
-      const effects = runtime.cycleMode();
-      applyEffects(effects);
+      const decision = runtime.transition({ type: "mode_cycle" });
+      applyDecision(decision, ctx);
       updateStatus(ctx);
-      if (effects.modeChanged) ctx.ui.notify(`Mode: ${currentMode().toUpperCase()}`, "info");
+      if (decision.modeChanged) ctx.ui.notify(`Mode: ${currentMode().toUpperCase()}`, "info");
     },
   });
 
@@ -202,18 +202,19 @@ export default async function (pi: ExtensionAPI) {
 
   // Gate tool access based on mode policy module
   pi.on("tool_call", async (event, _ctx) => {
+    runtime?.transition({ type: "tool_call", toolName: event.toolName });
     const mode = currentMode();
-    const decision = evaluateToolCall({
+    const policyDecision = evaluateToolCall({
       mode,
       definition: runtime?.definition(),
       toolName: event.toolName,
       input: event.input,
     });
 
-    if (decision.block) {
+    if (policyDecision.block) {
       return {
         block: true,
-        reason: decision.reason,
+        reason: policyDecision.reason,
       };
     }
   });
@@ -251,11 +252,12 @@ export default async function (pi: ExtensionAPI) {
 
     captureBaselineTools();
     const flag = pi.getFlag("mode");
-    const effects = runtime?.restore({
+    const decision = runtime?.transition({
+      type: "session_start",
       cliMode: typeof flag === "string" ? flag : undefined,
       sessionMode: lastSessionMode(ctx),
     });
-    applyEffects(effects);
+    applyDecision(decision, ctx);
     updateStatus(ctx);
 
     // Set custom editor to display current mode in chat border
@@ -294,7 +296,8 @@ export default async function (pi: ExtensionAPI) {
   // Persist after each turn to keep latest
   pi.on("turn_end", async (_event, ctx) => {
     currentCtx = ctx || currentCtx;
-    persistMode();
+    const decision = runtime?.transition({ type: "turn_end" });
+    applyDecision(decision, currentCtx);
     if (currentCtx) await checkAndReload(currentCtx);
   });
 
