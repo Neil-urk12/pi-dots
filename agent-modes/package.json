@@ -1,8 +1,12 @@
 {
-  "name": "pi-modes",
+  "name": "@neilurk12/pi-agent-modes",
   "version": "0.1.0",
   "description": "Multi-mode extension for pi coding agent: yolo, plan, ask, orchestrator",
   "main": "dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Neil-urk12/pi-dots.git"
+  },
   "types": "dist/index.d.ts",
   "type": "module",
   "files": [
@@ -27,7 +31,6 @@
     "plan",
     "orchestrator"
   ],
-  "author": "",
   "license": "MIT",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.1.0"
