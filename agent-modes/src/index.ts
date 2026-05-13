@@ -2,8 +2,9 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Key } from "@earendil-works/pi-tui";
 
-import type { ModeDefinition } from "./types.js";
 import { loadAllModes, notifyModeCatalogDiagnostics, type ModeCatalog } from "./mode-catalog.js";
+import { ModeRuntimeController, type ModeRuntimeEffects } from "./mode-runtime.js";
+
 type Mode = string;
 
 // Plan mode bash command filtering
@@ -106,39 +107,23 @@ function isSafeCommand(command: string): boolean {
   return !isDestructiveCommand(command) && SAFE_PATTERNS.some(p => p.test(command));
 }
 
-let activeCatalog: ModeCatalog | null = null;
-let lastLoadTime = 0;
-
-// Phase 1: markdown-driven mode definitions
-const modeDefinitions = new Map<Mode, ModeDefinition>();
-
-function replaceActiveCatalog(catalog: ModeCatalog): void {
-  activeCatalog = catalog;
-  modeDefinitions.clear();
-  for (const [mode, definition] of catalog.definitions) {
-    modeDefinitions.set(mode, definition);
-  }
-  lastLoadTime = catalog.loadedAt;
-}
-
-async function loadInitialModeCatalog(ctx?: ExtensionContext): Promise<void> {
+async function loadInitialModeCatalog(ctx?: ExtensionContext): Promise<ModeCatalog | undefined> {
   const result = await loadAllModes();
   if (result.ok) {
-    replaceActiveCatalog(result.catalog);
     if (ctx) notifyModeCatalogDiagnostics(ctx, result.diagnostics);
-    return;
+    return result.catalog;
   }
 
   if (ctx) notifyModeCatalogDiagnostics(ctx, result.diagnostics);
   console.error("[pi-modes] Failed to load required mode definitions", result.diagnostics);
+  return undefined;
 }
 
 export default async function (pi: ExtensionAPI) {
-  // internal state
-  let currentMode: Mode = "yolo";
-  let baselineTools: string[] = [];
-  let initialized: boolean = false;
-  await loadInitialModeCatalog();
+  let initialCatalog = await loadInitialModeCatalog();
+  let runtime = initialCatalog ? new ModeRuntimeController(initialCatalog) : undefined;
+  let currentCtx: ExtensionContext | undefined;
+  let reloadPending = false;
 
   // CLI flag: --mode <mode>
   pi.registerFlag("mode", {
@@ -146,27 +131,43 @@ export default async function (pi: ExtensionAPI) {
     type: "string",
   });
 
-  // commands
-  let currentCtx: ExtensionContext | undefined;
+  function currentMode(): Mode {
+    return runtime?.snapshot().currentMode ?? "yolo";
+  }
+
+  function currentModes(): Mode[] {
+    return runtime?.modes() ?? [];
+  }
+
+  function applyEffects(effects?: ModeRuntimeEffects): void {
+    if (!effects) return;
+    pi.setActiveTools(effects.activeTools);
+    if (effects.persist) persistMode();
+  }
 
   async function reloadAll(ctx: ExtensionContext): Promise<void> {
     const result = await loadAllModes();
     if (result.ok) {
-      replaceActiveCatalog(result.catalog);
+      if (!runtime) runtime = new ModeRuntimeController(result.catalog);
+      const reload = runtime.acceptCatalog(result.catalog);
       notifyModeCatalogDiagnostics(ctx, result.diagnostics);
-      applyModeTools(ctx);
+      applyEffects(reload.effects);
       updateStatus(ctx);
-      ctx.ui.notify("Mode definitions reloaded", "info");
+      if (reload.fallbackMode) {
+        ctx.ui.notify(`Mode definitions reloaded; current mode missing, fell back to ${reload.fallbackMode.toUpperCase()}`, "warning");
+      } else {
+        ctx.ui.notify("Mode definitions reloaded", "info");
+      }
       return;
     }
 
+    runtime?.keepCatalog();
     notifyModeCatalogDiagnostics(ctx, result.diagnostics);
-    ctx.ui.notify(activeCatalog ? "Mode reload failed; keeping previous known-good catalog" : "Mode reload failed; no known-good catalog loaded", activeCatalog ? "warning" : "error");
+    ctx.ui.notify(runtime ? "Mode reload failed; keeping previous known-good catalog" : "Mode reload failed; no known-good catalog loaded", runtime ? "warning" : "error");
   }
 
-  let reloadPending = false;
   async function checkAndReload(ctx: ExtensionContext): Promise<void> {
-    if (reloadPending) return;
+    if (reloadPending || !runtime) return;
     reloadPending = true;
     try {
       const fs = (await import("fs")).promises;
@@ -175,6 +176,7 @@ export default async function (pi: ExtensionAPI) {
       const baseDir = path.dirname(new URL(import.meta.url).pathname);
       const modesDir = path.join(baseDir, "..", "modes");
       const configPath = path.join(os.homedir(), ".pi", "modes", "config.yaml");
+      const lastLoadTime = runtime.lastLoadTime();
 
       let shouldReload = false;
 
@@ -198,9 +200,7 @@ export default async function (pi: ExtensionAPI) {
         } catch (e) {}
       }
 
-      if (shouldReload) {
-        await reloadAll(ctx);
-      }
+      if (shouldReload) await reloadAll(ctx);
     } finally {
       reloadPending = false;
     }
@@ -208,42 +208,51 @@ export default async function (pi: ExtensionAPI) {
 
   async function handleModeCommand(args: string | undefined, ctx: ExtensionContext): Promise<void> {
     currentCtx = ctx;
-    // reload subcommand
-    if (args && args.trim().toLowerCase() === "reload") {
+    if (!runtime) {
+      ctx.ui.notify("Mode catalog not initialized", "error");
+      return;
+    }
+
+    const command = args?.trim().toLowerCase();
+    if (command === "reload") {
       await reloadAll(ctx);
       return;
     }
 
-    // status subcommand
-    if (args && args.trim().toLowerCase() === "status") {
+    if (command === "status") {
       await showModeStatus(ctx);
       return;
     }
 
-    if (args && args.trim()) {
-      const mode = args.trim().toLowerCase();
-      if (!modeDefinitions.has(mode)) {
-        ctx.ui.notify(`Invalid mode: ${mode}. Available: ${Array.from(modeDefinitions.keys()).join(", ")}`, "error");
+    if (command) {
+      const result = runtime.setMode(command);
+      if (!result.ok) {
+        ctx.ui.notify(result.error ?? `Invalid mode: ${command}`, "error");
         return;
       }
-      setMode(mode, ctx);
+      applyEffects(result.effects);
+      updateStatus(ctx);
+      if (result.effects?.modeChanged) ctx.ui.notify(`Mode: ${command.toUpperCase()}`, "info");
       return;
     }
 
-    // interactive selector with mode descriptions
-    const modes = Array.from(modeDefinitions.keys());
+    const modes = currentModes();
     const options = modes.map(m => {
-      const def = modeDefinitions.get(m);
+      const def = runtime?.definition(m);
       const name = m.toUpperCase();
       return def?.description ? `${name} — ${def.description}` : name;
     });
     const choice = await ctx.ui.select("Select mode:", options);
 
     if (choice) {
-      // Extract the mode name from the choice string
       const selectedName = choice.split(" — ")[0].toLowerCase();
       const mode = modes.find(m => m.toLowerCase() === selectedName) || "yolo";
-      setMode(mode, ctx);
+      const result = runtime.setMode(mode);
+      if (result.ok) {
+        applyEffects(result.effects);
+        updateStatus(ctx);
+        if (result.effects?.modeChanged) ctx.ui.notify(`Mode: ${mode.toUpperCase()}`, "info");
+      }
     }
   }
 
@@ -265,17 +274,18 @@ export default async function (pi: ExtensionAPI) {
   pi.registerShortcut(Key.ctrlShift("m"), {
     description: "Cycle modes (yolo → plan → code → ask → orchestrator)",
     handler: async (ctx) => {
-      const modes = Array.from(modeDefinitions.keys());
-      const curIndex = modes.indexOf(currentMode);
-      const next = modes[(curIndex + 1) % modes.length];
-      setMode(next, ctx);
+      if (!runtime) return;
+      const effects = runtime.cycleMode();
+      applyEffects(effects);
+      updateStatus(ctx);
+      if (effects.modeChanged) ctx.ui.notify(`Mode: ${currentMode().toUpperCase()}`, "info");
     },
   });
 
-
   // Inject mode prompt on every provider request (compaction-safe)
   pi.on("before_provider_request", async (event) => {
-    const promptSuffix = modeDefinitions.get(currentMode)?.prompt_suffix;
+    const mode = currentMode();
+    const promptSuffix = runtime?.currentPromptSuffix();
     if (!promptSuffix) return;
 
     function injectIntoPayload(payload: any, text: string): void {
@@ -294,19 +304,21 @@ export default async function (pi: ExtensionAPI) {
       }
     }
 
-    injectIntoPayload(event.payload, `\n\n[MODE: ${currentMode.toUpperCase()}]
+    injectIntoPayload(event.payload, `\n\n[MODE: ${mode.toUpperCase()}]
 ${promptSuffix}`.trim());
   });
+
   // Gate tool access based on mode's enabled_tools, plus bash safety in restricted modes
   pi.on("tool_call", async (event, ctx) => {
-    const def = modeDefinitions.get(currentMode);
+    const mode = currentMode();
+    const def = runtime?.definition();
     const allowed = def?.enabled_tools;
     // Defensive: if mode definition missing (not loaded yet), block editing tools
     if (!def) {
       if (["write", "edit", "apply_patch"].includes(event.toolName)) {
         return {
           block: true,
-          reason: `Mode '${currentMode}' not initialized — editing blocked`
+          reason: `Mode '${mode}' not initialized — editing blocked`
         };
       }
     }
@@ -316,13 +328,13 @@ ${promptSuffix}`.trim());
       if (!allowed.includes(event.toolName)) {
         return {
           block: true,
-          reason: `${currentMode.toUpperCase()} mode blocks tool: ${event.toolName}. Allowed tools: ${allowed.join(", ")}`
+          reason: `${mode.toUpperCase()} mode blocks tool: ${event.toolName}. Allowed tools: ${allowed.join(", ")}`
         };
       }
     }
 
     // Extra safety: in plan/ask mode, gate bash commands by safety
-    if ((currentMode === "plan" || currentMode === "ask") && event.toolName === "bash") {
+    if ((mode === "plan" || mode === "ask") && event.toolName === "bash") {
       const command = event.input.command as string;
       if (!isSafeCommand(command)) {
         return {
@@ -333,7 +345,7 @@ ${promptSuffix}`.trim());
     }
 
     // Code mode: block destructive bash commands (allow non-destructive)
-    if (currentMode === "code" && event.toolName === "bash") {
+    if (mode === "code" && event.toolName === "bash") {
       const command = event.input.command as string;
       if (isDestructiveCommand(command)) {
         return {
@@ -344,82 +356,46 @@ ${promptSuffix}`.trim());
     }
   });
 
-
-  // Switch mode logic
-  function setMode(mode: Mode, ctx: ExtensionContext) {
-    if (mode === currentMode) return;
-    currentMode = mode;
-
-    applyModeTools(ctx);
-    updateStatus(ctx);
-    persistMode();
-    ctx.ui.notify(`Mode: ${mode.toUpperCase()}`, "info");
+  function captureBaselineTools(): void {
+    runtime?.captureBaselineTools(pi.getAllTools().map((t) => t.name));
   }
 
-
-  function applyModeTools(ctx: ExtensionContext) {
-    // Initialize baseline on first use
-    if (baselineTools.length === 0) {
-      baselineTools = pi.getAllTools().map((t) => t.name);
-    }
-
-    const def = modeDefinitions.get(currentMode);
-
-    const enabled = def?.enabled_tools;
-    if (enabled === undefined || enabled.length === 0) {
-      pi.setActiveTools(baselineTools);
-    } else {
-      pi.setActiveTools(enabled);
-    }
-  }
-
-  function updateStatus(ctx: ExtensionContext) {
-    const def = modeDefinitions.get(currentMode);
+  function updateStatus(ctx: ExtensionContext): void {
+    const mode = currentMode();
+    const def = runtime?.definition();
     const style = def?.border_style || "muted";
-    
-    let display = currentMode.toUpperCase();
+
+    let display = mode.toUpperCase();
     // Keep legacy emojis for standard modes
-    if (currentMode === "plan") display = "📋PLAN";
-    else if (currentMode === "orchestrator") display = "🤝ORCH";
-    else if (currentMode === "ask") display = "❓ASK";
+    if (mode === "plan") display = "📋PLAN";
+    else if (mode === "orchestrator") display = "🤝ORCH";
+    else if (mode === "ask") display = "❓ASK";
 
     ctx.ui.setStatus("mode", ctx.ui.theme.fg(style, display));
   }
 
-  function persistMode() {
-    pi.appendEntry("mode-state", { mode: currentMode });
+  function persistMode(): void {
+    pi.appendEntry("mode-state", { mode: currentMode() });
   }
 
   // Initialize on session start or resume
   pi.on("session_start", async (_event, ctx) => {
     currentCtx = ctx;
-    // Load markdown mode definitions (Phase 1)
-    await loadInitialModeCatalog(ctx);
-    // capture baseline tool set once
-    if (baselineTools.length === 0) {
-      baselineTools = pi.getAllTools().map((t) => t.name);
+    initialCatalog = await loadInitialModeCatalog(ctx) ?? initialCatalog;
+    if (initialCatalog) {
+      if (!runtime) runtime = new ModeRuntimeController(initialCatalog);
+      else runtime.acceptCatalog(initialCatalog);
     }
 
-    // check --mode flag
+    captureBaselineTools();
     const flag = pi.getFlag("mode");
-    if (typeof flag === "string" && modeDefinitions.has(flag)) {
-      currentMode = flag;
-    } else {
-      // restore from previous session if any
-      const entries = ctx.sessionManager.getEntries();
-      const last = entries
-        .filter((e) => e.type === "custom" && e.customType === "mode-state")
-        .pop();
-      if (last && "data" in last && last.data && typeof last.data === "object" && "mode" in last.data) {
-        const m = (last.data as { mode: string }).mode;
-        if (modeDefinitions.has(m)) {
-          currentMode = m;
-        }
-      }
-    }
-
-    applyModeTools(ctx);
+    const effects = runtime?.restore({
+      cliMode: typeof flag === "string" ? flag : undefined,
+      sessionMode: lastSessionMode(ctx),
+    });
+    applyEffects(effects);
     updateStatus(ctx);
+
     // Set custom editor to display current mode in chat border
     ctx.ui.setEditorComponent((tui, theme, keybindings) => {
       class ModeEditor extends CustomEditor {
@@ -427,15 +403,16 @@ ${promptSuffix}`.trim());
           const lines = super.render(width);
           if (lines.length === 0) return lines;
 
-          const def = modeDefinitions.get(currentMode);
-          let label = def?.border_label || ` ${currentMode.toUpperCase()} `;
+          const mode = currentMode();
+          const def = runtime?.definition();
+          let label = def?.border_label || ` ${mode.toUpperCase()} `;
           const style = def?.border_style;
 
           if (label && lines.length > 0) {
             const labelWidth = label.length;
             const dashes = "─".repeat(Math.max(0, width - labelWidth));
             const borderText = label + dashes;
-            
+
             // Apply custom theme color if specified
             if (style && style !== "muted" && typeof ctx.ui.theme.fg === "function") {
                // Use fg color mapped from style, or fallback to borderColor
@@ -456,22 +433,28 @@ ${promptSuffix}`.trim());
   pi.on("turn_end", async (_event, ctx) => {
     currentCtx = ctx || currentCtx;
     persistMode();
-    if (currentCtx) {
-      await checkAndReload(currentCtx);
-    }
+    if (currentCtx) await checkAndReload(currentCtx);
   });
 
-  async function showModeStatus(ctx: ExtensionContext) {
-    const def = modeDefinitions.get(currentMode);
+  async function showModeStatus(ctx: ExtensionContext): Promise<void> {
+    const mode = currentMode();
+    const def = runtime?.definition();
     const allTools = pi.getAllTools().map(t => t.name);
-    const activeTools = (def?.enabled_tools && def.enabled_tools.length > 0)
-      ? def.enabled_tools
-      : (baselineTools.length === 0 ? allTools : baselineTools);
-
+    const activeTools = runtime?.activeTools() ?? allTools;
     const suffixPreview = (def?.prompt_suffix || "").slice(0, 120) + (def?.prompt_suffix && def.prompt_suffix.length > 120 ? "..." : "");
 
-    const status = `Mode: ${currentMode}\nDescription: ${def?.description || "—"}\nActive tools (${activeTools.length}): ${activeTools.join(", ")}\nPrompt suffix: ${suffixPreview || "(none)"}\nBorder: ${def?.border_label || ""} (style: ${def?.border_style || "—"})`;
+    const status = `Mode: ${mode}\nDescription: ${def?.description || "—"}\nActive tools (${activeTools.length}): ${activeTools.join(", ")}\nPrompt suffix: ${suffixPreview || "(none)"}\nBorder: ${def?.border_label || ""} (style: ${def?.border_style || "—"})`;
 
     ctx.ui.notify(status, "info");
   }
+}
+
+function lastSessionMode(ctx: ExtensionContext): string | undefined {
+  const last = ctx.sessionManager.getEntries()
+    .filter((e) => e.type === "custom" && e.customType === "mode-state")
+    .pop();
+  if (last && "data" in last && last.data && typeof last.data === "object" && "mode" in last.data) {
+    return (last.data as { mode: string }).mode;
+  }
+  return undefined;
 }
