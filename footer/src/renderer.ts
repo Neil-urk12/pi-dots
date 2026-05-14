@@ -1,9 +1,7 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ResolvedConfig } from "./config.js";
+import type { ColorFn, FooterInput, Theme } from "./types.js";
 import {
-	type Totals,
-	type ColorFn,
 	formatModelSegment,
 	formatDirectorySegment,
 	formatGitSegment,
@@ -11,21 +9,6 @@ import {
 	formatContextSegment,
 } from "./segments.js";
 
-type Theme = ExtensionContext["ui"]["theme"];
-
-// ── FooterInput ────────────────────────────────────────────────
-
-export type FooterInput = {
-	modelId: string;
-	thinkingLevel?: string;
-	directory?: string;
-	gitBranch?: string;
-	gitDirtyCount: number;
-	contextUsed: number;
-	contextMax?: number;
-	totals: Totals;
-	config: ResolvedConfig;
-};
 
 // ── Segment Builder ────────────────────────────────────────────
 
