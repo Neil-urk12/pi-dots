@@ -6,6 +6,7 @@ import { loadAllModes, notifyModeCatalogDiagnostics, type ModeCatalog } from "./
 import { ModeRuntimeController, type ModeRuntimeDecision } from "./mode-runtime.js";
 import { injectIntoPayload } from "./payload-injection.js";
 import { evaluateToolCall } from "./mode-tool-policy.js";
+import { ModeFileWatcher } from "./mode-file-watcher.js";
 
 type Mode = string;
 
@@ -27,6 +28,14 @@ export default async function (pi: ExtensionAPI) {
   let runtime = initialCatalog ? new ModeRuntimeController(initialCatalog) : undefined;
   let currentCtx: ExtensionContext | undefined;
   let reloadPending = false;
+  const path = await import("path");
+  const os = await import("os");
+  const { fileURLToPath } = await import("url");
+  const baseDir = path.dirname(fileURLToPath(import.meta.url));
+  const fileWatcher = new ModeFileWatcher(
+    path.join(baseDir, "..", "modes"),
+    path.join(os.homedir(), ".pi", "modes", "config.yaml"),
+  );
 
   // CLI flag: --mode <mode>
   pi.registerFlag("mode", {
@@ -73,38 +82,8 @@ export default async function (pi: ExtensionAPI) {
     if (reloadPending || !runtime) return;
     reloadPending = true;
     try {
-      const fs = (await import("fs")).promises;
-      const path = await import("path");
-      const os = await import("os");
-      const { fileURLToPath } = await import("url");
-      const baseDir = path.dirname(fileURLToPath(import.meta.url));
-      const modesDir = path.join(baseDir, "..", "modes");
-      const configPath = path.join(os.homedir(), ".pi", "modes", "config.yaml");
-      const lastLoadTime = runtime.lastLoadTime();
-
-      let shouldReload = false;
-
-      try {
-        const st = await fs.stat(configPath);
-        if (st.mtimeMs > lastLoadTime) shouldReload = true;
-      } catch (e) {}
-
-      if (!shouldReload) {
-        try {
-          const files = await fs.readdir(modesDir);
-          for (const file of files) {
-            if (file.endsWith(".md")) {
-              const st = await fs.stat(path.join(modesDir, file));
-              if (st.mtimeMs > lastLoadTime) {
-                shouldReload = true;
-                break;
-              }
-            }
-          }
-        } catch (e) {}
-      }
-
-      if (shouldReload) await reloadAll(ctx);
+      const changed = await fileWatcher.hasChanges(runtime.lastLoadTime());
+      if (changed) await reloadAll(ctx);
     } finally {
       reloadPending = false;
     }
