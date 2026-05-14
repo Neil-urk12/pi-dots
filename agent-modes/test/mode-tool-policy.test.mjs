@@ -111,3 +111,56 @@ test("mode fallback matrix applies when bash_policy omitted", () => {
   assert.equal(planResult.block, true);
   assert.equal(codeResult.block, false);
 });
+
+test("curl read-only usage is allowed in strict_readonly", () => {
+  const allowed = [
+    "curl http://example.com",
+    "curl -L http://example.com",
+    "curl -I http://example.com",
+    "curl -v http://example.com",
+    "curl -s http://example.com",
+    "curl -sS http://example.com",
+    "curl -o - http://example.com",
+    "curl -O -",
+    "curl -J http://example.com",
+    "curl http://example.com/foo-o/bar",
+    "curl http://example.com/path-o/file",
+    'curl "http://example.com/file-o"',
+  ];
+  for (const cmd of allowed) {
+    const result = decision({
+      mode: "plan",
+      definition: { mode: "plan", enabled_tools: ["bash"], bash_policy: "strict_readonly" },
+      toolName: "bash",
+      input: { command: cmd },
+    });
+    assert.deepEqual(result, { block: false }, `curl command should be allowed: ${cmd}`);
+  }
+});
+
+test("curl file-writing flags are blocked in strict_readonly", () => {
+  const blocked = [
+    "curl -o file http://example.com",
+    "curl -O http://example.com",
+    "curl --output file http://example.com",
+    "curl --remote-name http://example.com",
+    "curl --remote-header-name http://example.com",
+    "curl -J -O http://example.com",
+    "curl -OJ http://example.com",
+    "curl -oA http://example.com",
+    "curl -so file http://example.com",
+    "curl -sO http://example.com",
+    "curl -L -o file http://example.com",
+    "curl --create-dirs -o dir/file http://example.com",
+  ];
+  for (const cmd of blocked) {
+    const result = decision({
+      mode: "plan",
+      definition: { mode: "plan", enabled_tools: ["bash"], bash_policy: "strict_readonly" },
+      toolName: "bash",
+      input: { command: cmd },
+    });
+    assert.equal(result.block, true, `curl command should be blocked: ${cmd}`);
+    assert.match(result.reason, /Allowed read-only commands only/);
+  }
+});
