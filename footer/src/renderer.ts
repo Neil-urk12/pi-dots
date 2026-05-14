@@ -1,5 +1,6 @@
 import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import type { ColorFn, FooterInput, Theme, Totals } from "./types.js";
+import { formatModelName } from "./modelName.js";
 
 // ── Public interface ──────────────────────────────────────────
 
@@ -89,55 +90,6 @@ function formatCount(value: number): string {
 	return `${(value / 1_000_000).toFixed(1)}m`;
 }
 
-function formatModelName(
-	modelId: string,
-	aliases: Record<string, string>,
-): string {
-	if (aliases[modelId]) return aliases[modelId];
-
-	const lower = modelId.toLowerCase();
-	const withoutProvider = lower.includes("/")
-		? lower.split("/").pop()!
-		: lower;
-	if (aliases[withoutProvider]) return aliases[withoutProvider];
-
-	if (
-		withoutProvider.includes("claude") &&
-		withoutProvider.includes("sonnet")
-	) {
-		if (
-			withoutProvider.includes("4-5") ||
-			withoutProvider.includes("4.5")
-		)
-			return "sonnet-4.5";
-		if (withoutProvider.includes("4")) return "sonnet-4";
-		return "sonnet";
-	}
-
-	if (
-		withoutProvider.includes("claude") &&
-		withoutProvider.includes("opus")
-	)
-		return "opus";
-	if (
-		withoutProvider.includes("claude") &&
-		withoutProvider.includes("haiku")
-	)
-		return "haiku";
-
-	const gpt5 = withoutProvider.match(/gpt-5(?:[.-][a-z0-9]+)*/);
-	if (gpt5) return gpt5[0];
-
-	const gpt4 = withoutProvider.match(/gpt-4(?:[.-][a-z0-9]+)*/);
-	if (gpt4) return gpt4[0];
-
-	const gemini = withoutProvider.match(/gemini-[a-z0-9.-]+/);
-	if (gemini) return gemini[0].replace(/-preview.*/, "");
-
-	return withoutProvider.length > 24
-		? `${withoutProvider.slice(0, 21)}…`
-		: withoutProvider;
-}
 
 // ── Private: segment formatters ───────────────────────────────
 
