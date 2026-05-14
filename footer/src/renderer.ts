@@ -1,4 +1,4 @@
-import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { layout } from "./layout.js";
 import type { ColorFn, FooterInput, Theme, Totals } from "./types.js";
 import { formatModelName } from "./modelName.js";
 
@@ -13,7 +13,7 @@ export function renderFooter(
 		theme.fg(colorName as never, text);
 	const segments = buildSegments(input, cf);
 	const separator = cf(input.config.colors.separator, " | ");
-	return layout(segments, separator, width);
+	return [renderLayout(segments, separator, width)];
 }
 
 // ── Private: segment builder ──────────────────────────────────
@@ -175,9 +175,9 @@ function contextSegment(
 	return cf(input.config.colors.contextNormal, text);
 }
 
-// ── Private: layout engine ────────────────────────────────────
+// ── Private: width-tier branching ──────────────────────────────
 
-function layout(
+function renderLayout(
 	segments: {
 		model: string;
 		dir?: string;
@@ -191,66 +191,37 @@ function layout(
 	},
 	separator: string,
 	width: number,
-): string[] {
-	const leftFull = [segments.model, segments.dir, segments.git]
-		.filter(Boolean)
-		.join(separator);
-	const leftMin = segments.model;
+): string {
+	const leftFull = [segments.model, segments.dir, segments.git];
+	const leftMin = [segments.model];
+	const context = segments.context ? [segments.context] : [];
 
 	if (width >= 100) {
-		const right = [segments.context, segments.tokens.full]
-			.filter(Boolean)
-			.join(separator);
-		return [joinLeftRight(leftFull, right, width)];
+		return layout(
+			leftFull,
+			[...context, segments.tokens.full].filter(Boolean),
+			separator,
+			width,
+		);
 	}
-
 	if (width >= 80) {
-		const right = [segments.context, segments.tokens.noCache]
-			.filter(Boolean)
-			.join(separator);
-		return [joinLeftRight(leftFull, right, width)];
+		return layout(
+			leftFull,
+			[...context, segments.tokens.noCache].filter(Boolean),
+			separator,
+			width,
+		);
 	}
-
 	if (width >= 60) {
-		const right = [
-			segments.context,
-			segments.tokens.totalOnly,
-		]
-			.filter(Boolean)
-			.join(separator);
-		return [joinLeftRight(leftFull, right, width)];
+		return layout(
+			leftFull,
+			[...context, segments.tokens.totalOnly].filter(Boolean),
+			separator,
+			width,
+		);
 	}
-
-	if (width >= 40)
-		return [
-			joinLeftRight(
-				leftFull,
-				segments.context ?? "",
-				width,
-			),
-		];
-
-	return [
-		joinLeftRight(leftMin, segments.context ?? "", width),
-	];
-}
-
-function joinLeftRight(
-	left: string,
-	right: string,
-	width: number,
-): string {
-	if (!right) return truncateToWidth(left, width);
-	if (!left) return truncateToWidth(right, width);
-
-	const gap = width - visibleWidth(left) - visibleWidth(right);
-	if (gap >= 1)
-		return truncateToWidth(left + " ".repeat(gap) + right, width);
-
-	const half = Math.max(1, Math.floor((width - 1) / 2));
-	return (
-		truncateToWidth(left, half) +
-		" " +
-		truncateToWidth(right, width - half - 1)
-	);
+	if (width >= 40) {
+		return layout(leftFull, context, separator, width);
+	}
+	return layout(leftMin, context, separator, width);
 }
