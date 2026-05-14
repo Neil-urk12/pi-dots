@@ -5,6 +5,8 @@ import os from "node:os";
 import { FooterLifecycle } from "./lifecycle.js";
 import { renderFooter } from "./renderer.js";
 
+export type { ColorFn, FooterInput, Totals, Theme } from "./types.js";
+
 export default function (pi: ExtensionAPI) {
 	const globalConfigPath = path.join(
 		os.homedir(),

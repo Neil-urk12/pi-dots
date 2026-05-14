@@ -2,7 +2,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 
 import { defaultConfig, loadFooterConfig, type ResolvedConfig } from "./config.js";
-import { type FooterInput } from "./renderer.js";
+import type { FooterInput } from "./types.js";
 import { createGitState, type GitStateHandle } from "./git.js";
 import { accumulateTotals } from "./tokens.js";
 import { normalizeThinkingLevel } from "./utils.js";

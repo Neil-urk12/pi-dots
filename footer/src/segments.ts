@@ -1,19 +1,8 @@
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-
-type Theme = ExtensionContext["ui"]["theme"];
-
-// ── Types ──────────────────────────────────────────────────────
-
-export type ColorFn = (colorName: string, text: string) => string;
-
-export type Totals = {
-	input: number;
-	output: number;
-	cacheRead: number;
-	cacheWrite: number;
-};
+import type { ColorFn, Totals } from "./types.js";
 
 // ── Low-level helpers ──────────────────────────────────────────
+
+import type { Theme } from "./types.js";
 
 export function color(theme: Theme, colorName: string, text: string): string {
 	return theme.fg(colorName as never, text);

@@ -1,5 +1,5 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { Totals } from "./segments.js";
+import type { Totals } from "./types.js";
 
 // ── Accumulator ─────────────────────────────────────────────────
 
