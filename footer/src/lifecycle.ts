@@ -55,7 +55,7 @@ export class FooterLifecycle {
 
 		if (this.#footerEnabled) {
 			this.#createGit(ctx.cwd);
-			await this.#git.refresh();
+			await this.#git!.refresh();
 		}
 	}
 
@@ -117,13 +117,8 @@ export class FooterLifecycle {
 		this.#git = undefined;
 
 		if (this.#footerEnabled) {
-			this.#git = createGitState({
-				cwd: this.#cwd,
-				debounceMs: this.#config.gitRefreshDebounceMs,
-				enabled: this.#config.showGit,
-				onChange: () => this.#onRenderNeeded(),
-			});
-			await this.#git.refresh();
+			this.#createGit(this.#cwd);
+			await this.#git!.refresh();
 		}
 
 		this.#onRenderNeeded();
@@ -136,13 +131,8 @@ export class FooterLifecycle {
 			this.#git = undefined;
 		} else {
 			this.#thinkingLevel = normalizeThinkingLevel(this.#getThinkingLevel());
-			this.#git = createGitState({
-				cwd: this.#cwd,
-				debounceMs: this.#config.gitRefreshDebounceMs,
-				enabled: this.#config.showGit,
-				onChange: () => this.#onRenderNeeded(),
-			});
-			await this.#git.refresh();
+			this.#createGit(this.#cwd);
+			await this.#git!.refresh();
 		}
 		this.#onRenderNeeded();
 		return this.#footerEnabled;
