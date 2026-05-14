@@ -114,9 +114,7 @@ This configuration is merged over the built-in markdown definitions.
 - Run `/mode reload` to immediately reload the mode definitions and your overrides.
 - The `modes/` directory and your `config.yaml` are auto-watched. Edits trigger an automatic hot-reload when your turn ends.
 
-v0.2.2 (current): markdown-driven config with mode-specific `bash_policy`, enforced via `mode-tool-policy`.
-v0.2.1: markdown-driven config, initial shell-filtered safety in PLAN.
-v0.1.x → v0.2.x: replace extension files; modes/*.md included; no config migration needed.
+v0.1.0 (current): markdown-driven config with mode-specific `bash_policy`, enforced via `mode-tool-policy`.
 ## Development
 
 ```bash
