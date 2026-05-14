@@ -212,7 +212,8 @@ export function buildModeCatalog(input: BuildModeCatalogInput): ModeCatalogResul
 export async function loadAllModes(options: LoadModeCatalogOptions = {}): Promise<ModeCatalogResult> {
   const path = await import("path");
   const os = await import("os");
-  const baseDir = path.dirname(new URL(import.meta.url).pathname);
+  const { fileURLToPath } = await import("url");
+  const baseDir = path.dirname(fileURLToPath(import.meta.url));
   const modesDir = options.modesDir ?? path.join(baseDir, "..", "modes");
   const userConfigPath = options.userConfigPath ?? path.join(os.homedir(), ".pi", "modes", "config.yaml");
   const diagnostics: ModeCatalogDiagnostic[] = [];
