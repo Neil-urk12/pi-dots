@@ -4,7 +4,7 @@ Clean, minimal, and lightweight powerline-style footer extension for [pi](https:
 
 Shows a compact split footer:
 
-![pi-clean-footer example](https://raw.githubusercontent.com/Neil-urk12/pi-dots/main/footer/example.png)
+![pi-clean-footer example](https://ik.imagekit.io/tqjjsoud1y/example.webp)
 
 ## Features
 
