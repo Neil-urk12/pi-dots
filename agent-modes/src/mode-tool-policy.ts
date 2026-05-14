@@ -56,6 +56,11 @@ const DESTRUCTIVE_PATTERNS = [
   /\bsystemctl\s+(start|stop|restart|enable|disable)/i,
   /\bservice\s+\S+\s+(start|stop|restart)/i,
   /\b(vim?|nano|emacs|code|subl)\b/i,
+  /\bcurl\b.*\s-(?:[a-zA-Z]*[oO])(?!\s*-)/i,
+  /\bcurl\b.*--output\b/i,
+  /\bcurl\b.*--remote-name\b/i,
+  /\bcurl\b.*--remote-header-name\b/i,
+  /\bcurl\b.*--create-dirs\b/i,
 ] as const;
 
 const SAFE_PATTERNS = [
