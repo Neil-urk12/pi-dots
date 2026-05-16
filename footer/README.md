@@ -82,7 +82,9 @@ Example:
   "enabled": true,
   "showGit": true,
   "showTokens": true,
-  "showCache": false,
+  "showCache": true,
+  "showCacheRead": true,
+  "showCacheWrites": true,
   "showContext": true,
   "showDirectory": true,
   "showEffort": true,
@@ -135,7 +137,7 @@ Supported layout segment IDs:
 - `tokensNoCache` - input, output, and total tokens
 - `tokensTotal` - total tokens only
 
-`layouts` are selected by the highest `minWidth` less than or equal to the terminal width. `showGit`, `showTokens`, `showContext`, `showDirectory`, and `showEffort` still act as global visibility controls. Unknown or duplicate layout segments are omitted and reported by `/footer config`.
+`layouts` are selected by the highest `minWidth` less than or equal to the terminal width. `showGit`, `showTokens`, `showContext`, `showDirectory`, and `showEffort` still act as global visibility controls. `showCache` is a deprecated global cache-token gate; use `showCacheRead` and `showCacheWrites` to hide cache read (`↯`) and write (`↥`) counts independently. Unknown or duplicate layout segments are omitted and reported by `/footer config`.
 
 Malformed JSON keeps defaults/last loaded behavior and reports an error through `/footer config` or at startup.
 

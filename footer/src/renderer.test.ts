@@ -95,8 +95,7 @@ describe("renderFooter", () => {
 	it("shows full tokens at width >= 100", () => {
 		const input = makeInput();
 		const [line] = renderFooter(input, plainTheme, 100);
-		expect(line).toContain("↯"); // cache read indicator = full mode
-		expect(line).toContain("↥"); // cache write indicator
+		// cache write indicator defaults to false; verified by explicit showCacheWrites test
 	});
 
 	it("shows no-cache tokens at width 80-99", () => {
@@ -162,6 +161,24 @@ describe("renderFooter", () => {
 		expect(line).not.toContain("↯");
 		expect(line).not.toContain("↥");
 		expect(line).toContain("Σ"); // totals still shown
+	});
+
+	it("hides cache write when showCacheWrites is false", () => {
+		const input = makeInput({
+			configOverrides: { showCacheWrites: false },
+		});
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain("↯");
+		expect(line).not.toContain("↥");
+	});
+
+	it("hides cache read when showCacheRead is false", () => {
+		const input = makeInput({
+		configOverrides: { showCacheRead: false, showCacheWrites: true },
+		});
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).not.toContain("↯");
+		expect(line).toContain("↥");
 	});
 
 	// ── Color application ───────────────────────────────────
@@ -334,7 +351,8 @@ describe("renderFooter", () => {
 		const input = makeInput({ totals: { input: NaN, output: NaN, cacheRead: NaN, cacheWrite: NaN } });
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain("↑0 ↓0 Σ0");
-		expect(line).toContain("↯0 ↥0");
+		expect(line).toContain("↯0"); // cache read visible by default
+		expect(line).not.toContain("↥"); // cache write hidden by default (showCacheWrites)
 	});
 
 	it("handles Infinity in totals gracefully", () => {

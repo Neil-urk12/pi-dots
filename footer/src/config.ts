@@ -24,7 +24,9 @@ export type CleanFooterConfig = {
 	enabled?: boolean;
 	showGit?: boolean;
 	showTokens?: boolean;
-	showCache?: boolean;
+	showCache?: boolean; // deprecated: use showCacheRead
+	showCacheRead?: boolean;
+	showCacheWrites?: boolean;
 	showContext?: boolean;
 	showDirectory?: boolean;
 	showEffort?: boolean;
@@ -96,7 +98,9 @@ export const defaultConfig: ResolvedConfig = {
 	enabled: true,
 	showGit: true,
 	showTokens: true,
-	showCache: true,
+	showCache: true, /* deprecated: showCacheRead */
+	showCacheRead: true,
+	showCacheWrites: false,
 	showContext: true,
 	showDirectory: true,
 	showEffort: true,
