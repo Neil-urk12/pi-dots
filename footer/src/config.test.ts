@@ -65,6 +65,20 @@ describe("footer config layout resolution", () => {
 		);
 	});
 
+	it("falls back to defaults when a layout has no visible segments", () => {
+		const result = resolveConfigWithWarnings({
+			layouts: [{ minWidth: 0, left: [], right: [] }],
+		});
+
+		expect(result.config.layouts).toEqual(defaultFooterLayouts);
+		expect(result.warnings).toContain(
+			"layouts[0] has no visible segments; skipping",
+		);
+		expect(result.warnings).toContain(
+			"no valid layouts configured; using default layouts",
+		);
+	});
+
 	it("falls back to defaults when layouts is not an array", () => {
 		const result = resolveConfigWithWarnings({ layouts: "bad" as never });
 
