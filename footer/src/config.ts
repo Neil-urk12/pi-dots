@@ -242,6 +242,10 @@ function resolveLayouts(layouts: unknown): {
 			warnings,
 			new Set(left),
 		);
+		if (left.length === 0 && right.length === 0) {
+			warnings.push(`layouts[${index}] has no visible segments; skipping`);
+			return [];
+		}
 		return [{ minWidth, left, right }];
 	});
 
