@@ -87,6 +87,24 @@ Example:
   "showDirectory": true,
   "showEffort": true,
   "gitRefreshDebounceMs": 500,
+  "separator": " • ",
+  "layouts": [
+    {
+      "minWidth": 100,
+      "left": ["model", "directory", "git"],
+      "right": ["context", "tokensFull"]
+    },
+    {
+      "minWidth": 60,
+      "left": ["model", "git"],
+      "right": ["context", "tokensTotal"]
+    },
+    {
+      "minWidth": 0,
+      "left": ["model"],
+      "right": ["context"]
+    }
+  ],
   "contextWarningPercent": 70,
   "contextDangerPercent": 85,
   "modelAliases": {
@@ -106,6 +124,18 @@ Example:
   }
 }
 ```
+
+Supported layout segment IDs:
+
+- `model` - model name plus thinking effort when `showEffort` is enabled
+- `directory` - current directory basename
+- `git` - git branch and dirty count
+- `context` - context usage
+- `tokensFull` - input, output, total, cache read, and cache write tokens
+- `tokensNoCache` - input, output, and total tokens
+- `tokensTotal` - total tokens only
+
+`layouts` are selected by the highest `minWidth` less than or equal to the terminal width. `showGit`, `showTokens`, `showContext`, `showDirectory`, and `showEffort` still act as global visibility controls. Unknown or duplicate layout segments are omitted and reported by `/footer config`.
 
 Malformed JSON keeps defaults/last loaded behavior and reports an error through `/footer config` or at startup.
 

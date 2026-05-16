@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderFooter } from "./renderer.js";
 import type { FooterInput, Theme, Totals } from "./types.js";
-import type { ResolvedConfig } from "./config.js";
+import { defaultConfig as baseDefaultConfig, resolveConfigWithWarnings, type ResolvedConfig } from "./config.js";
 
 // ── Test helpers ───────────────────────────────────────────────
 
@@ -14,28 +14,7 @@ const captureTheme = {
 } as unknown as Theme;
 
 const defaultConfig: ResolvedConfig = {
-	enabled: true,
-	showGit: true,
-	showTokens: true,
-	showCache: true,
-	showContext: true,
-	showDirectory: true,
-	showEffort: true,
-	gitRefreshDebounceMs: 500,
-	contextWarningPercent: 70,
-	contextDangerPercent: 85,
-	modelAliases: {},
-	colors: {
-		model: "accent",
-		directory: "dim",
-		git: "success",
-		gitDirty: "warning",
-		contextNormal: "success",
-		contextWarning: "warning",
-		contextDanger: "error",
-		tokens: "muted",
-		separator: "dim",
-	},
+	...baseDefaultConfig,
 };
 
 const zeroTotals: Totals = {
@@ -315,6 +294,40 @@ describe("renderFooter", () => {
 		const input = makeInput();
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain(" | ");
+	});
+
+	it("uses custom separator between rendered segments", () => {
+		const input = makeInput({ configOverrides: { separator: " • " } });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain(" • ");
+		expect(line).not.toContain(" | ");
+	});
+
+	it("uses configured left and right segment order", () => {
+		const input = makeInput({
+			configOverrides: {
+				layouts: [{ minWidth: 0, left: ["git", "model"], right: ["tokensTotal", "context"] }],
+			},
+		});
+		const [line] = renderFooter(input, plainTheme, 200);
+		expect(line.indexOf("main")).toBeLessThan(line.indexOf("sonnet-4"));
+		expect(line.indexOf("Σ2.0k")).toBeLessThan(line.indexOf("ctx"));
+	});
+
+	it("selects highest matching layout when layouts are out of order", () => {
+		const config = resolveConfigWithWarnings({
+			...defaultConfig,
+			layouts: [
+				{ minWidth: 0, left: ["model"], right: [] },
+				{ minWidth: 100, left: ["git"], right: [] },
+				{ minWidth: 60, left: ["directory"], right: [] },
+			],
+		}).config;
+		const input = makeInput({ config });
+		const [line] = renderFooter(input, plainTheme, 80);
+		expect(line).toContain("my-project");
+		expect(line).not.toContain("sonnet-4");
+		expect(line).not.toContain("main");
 	});
 
 	it("handles NaN in totals gracefully", () => {

@@ -32,7 +32,7 @@ export class FooterLifecycle {
 		this.#getThinkingLevel = opts.getThinkingLevel;
 		this.#onRenderNeeded = opts.onRenderNeeded;
 		this.#config = defaultConfig;
-		this.#loadedConfig = { config: this.#config, loadedPaths: [] };
+		this.#loadedConfig = { config: this.#config, loadedPaths: [], warnings: [] };
 		this.#thinkingLevel = undefined;
 		this.#git = undefined;
 		this.#footerEnabled = true;
@@ -162,6 +162,10 @@ export class FooterLifecycle {
 
 	get loadedError(): string | undefined {
 		return this.#loadedConfig.error;
+	}
+
+	get loadedWarnings(): string[] {
+		return this.#loadedConfig.warnings;
 	}
 
 	get loadedPaths(): string[] {
