@@ -26,6 +26,8 @@ function buildSegments(
 	cf: ColorFn,
 ): SegmentMap {
 	const cfg = input.config;
+	const showCacheRead = cfg.showCache && cfg.showCacheRead;
+	const showCacheWrites = cfg.showCache && cfg.showCacheWrites;
 
 	return {
 		model: formatModelSegment(input, cf),
@@ -36,7 +38,8 @@ function buildSegments(
 			? formatTokenSegment(
 				input.totals,
 				"full",
-				cfg.showCache,
+				showCacheRead,
+				showCacheWrites,
 				cf,
 				cfg.colors.tokens,
 			)
@@ -45,7 +48,8 @@ function buildSegments(
 			? formatTokenSegment(
 				input.totals,
 				"no-cache",
-				cfg.showCache,
+				showCacheRead,
+				showCacheWrites,
 				cf,
 				cfg.colors.tokens,
 			)
@@ -54,7 +58,8 @@ function buildSegments(
 			? formatTokenSegment(
 				input.totals,
 				"total-only",
-				cfg.showCache,
+				showCacheRead,
+				showCacheWrites,
 				cf,
 				cfg.colors.tokens,
 			)
@@ -114,26 +119,29 @@ function gitSegment(
 function formatTokenSegment(
 	totals: Totals,
 	mode: "full" | "no-cache" | "total-only",
-	showCache: boolean,
+	showCacheRead: boolean,
+	showCacheWrites: boolean,
 	cf: ColorFn,
 	tokenColor: string,
 ): string {
-	const effectiveMode =
-		showCache ? mode : mode === "full" ? "no-cache" : mode;
-
 	const total = totals.input + totals.output;
 
 	let text: string;
-	if (effectiveMode === "total-only") {
+	if (mode === "total-only") {
 		text = `Σ${formatCount(total)}`;
 	} else {
 		const base = `↑${formatCount(totals.input)} ↓${formatCount(
 			totals.output,
 		)} Σ${formatCount(total)}`;
-		text =
-			effectiveMode === "full"
-				? `${base} ↯${formatCount(totals.cacheRead)} ↥${formatCount(totals.cacheWrite)}`
-				: base;
+		if (mode === "full") {
+			const cacheParts = [
+				showCacheRead ? `↯${formatCount(totals.cacheRead)}` : undefined,
+				showCacheWrites ? `↥${formatCount(totals.cacheWrite)}` : undefined,
+			].filter(Boolean);
+			text = cacheParts.length ? `${base} ${cacheParts.join(" ")}` : base;
+		} else {
+			text = base;
+		}
 	}
 
 	return cf(tokenColor, text);
