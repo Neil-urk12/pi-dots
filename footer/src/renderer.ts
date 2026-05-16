@@ -1,5 +1,6 @@
 import { layout } from "./layout.js";
 import type { ColorFn, FooterInput, Theme, Totals } from "./types.js";
+import type { FooterLayoutConfig, FooterSegmentId } from "./config.js";
 import { formatModelName } from "./modelName.js";
 
 // ── Public interface ──────────────────────────────────────────
@@ -12,72 +13,53 @@ export function renderFooter(
 	const cf: ColorFn = (colorName, text) =>
 		theme.fg(colorName as never, text);
 	const segments = buildSegments(input, cf);
-	const separator = cf(input.config.colors.separator, " | ");
-	return [renderLayout(segments, separator, width)];
+	const separator = cf(input.config.colors.separator, input.config.separator);
+	return [renderLayout(segments, separator, input.config.layouts, width)];
 }
 
 // ── Private: segment builder ──────────────────────────────────
 
+type SegmentMap = Record<FooterSegmentId, string | undefined>;
+
 function buildSegments(
 	input: FooterInput,
 	cf: ColorFn,
-): {
-	model: string;
-	dir?: string;
-	git?: string;
-	context?: string;
-	tokens: {
-		full?: string;
-		noCache?: string;
-		totalOnly?: string;
-	};
-} {
+): SegmentMap {
 	const cfg = input.config;
 
-	const model = formatModelSegment(input, cf);
-
-	const dir = cfg.showDirectory
-		? directorySegment(input, cf)
-		: undefined;
-
-	const git = cfg.showGit
-		? gitSegment(input, cf)
-		: undefined;
-
-	const context = cfg.showContext
-		? contextSegment(input, cf)
-		: undefined;
-
-	const tokens: {
-		full?: string;
-		noCache?: string;
-		totalOnly?: string;
-	} = {};
-	if (cfg.showTokens) {
-		tokens.full = formatTokenSegment(
-			input.totals,
-			"full",
-			cfg.showCache,
-			cf,
-			cfg.colors.tokens,
-		);
-		tokens.noCache = formatTokenSegment(
-			input.totals,
-			"no-cache",
-			cfg.showCache,
-			cf,
-			cfg.colors.tokens,
-		);
-		tokens.totalOnly = formatTokenSegment(
-			input.totals,
-			"total-only",
-			cfg.showCache,
-			cf,
-			cfg.colors.tokens,
-		);
-	}
-
-	return { model, dir, git, context, tokens };
+	return {
+		model: formatModelSegment(input, cf),
+		directory: cfg.showDirectory ? directorySegment(input, cf) : undefined,
+		git: cfg.showGit ? gitSegment(input, cf) : undefined,
+		context: cfg.showContext ? contextSegment(input, cf) : undefined,
+		tokensFull: cfg.showTokens
+			? formatTokenSegment(
+				input.totals,
+				"full",
+				cfg.showCache,
+				cf,
+				cfg.colors.tokens,
+			)
+			: undefined,
+		tokensNoCache: cfg.showTokens
+			? formatTokenSegment(
+				input.totals,
+				"no-cache",
+				cfg.showCache,
+				cf,
+				cfg.colors.tokens,
+			)
+			: undefined,
+		tokensTotal: cfg.showTokens
+			? formatTokenSegment(
+				input.totals,
+				"total-only",
+				cfg.showCache,
+				cf,
+				cfg.colors.tokens,
+			)
+			: undefined,
+	};
 }
 
 // ── Private: low-level helpers ────────────────────────────────
@@ -178,50 +160,29 @@ function contextSegment(
 // ── Private: width-tier branching ──────────────────────────────
 
 function renderLayout(
-	segments: {
-		model: string;
-		dir?: string;
-		git?: string;
-		context?: string;
-		tokens: {
-			full?: string;
-			noCache?: string;
-			totalOnly?: string;
-		};
-	},
+	segments: SegmentMap,
 	separator: string,
+	layouts: FooterLayoutConfig[],
 	width: number,
 ): string {
-	const leftFull = [segments.model, segments.dir, segments.git];
-	const leftMin = [segments.model];
-	const context = segments.context ? [segments.context] : [];
+	const selectedLayout = selectLayout(layouts, width);
+	const left = resolveLayoutSegments(selectedLayout.left, segments);
+	const right = resolveLayoutSegments(selectedLayout.right, segments);
+	return layout(left, right, separator, width);
+}
 
-	if (width >= 100) {
-		return layout(
-			leftFull,
-			[...context, segments.tokens.full].filter(Boolean),
-			separator,
-			width,
-		);
-	}
-	if (width >= 80) {
-		return layout(
-			leftFull,
-			[...context, segments.tokens.noCache].filter(Boolean),
-			separator,
-			width,
-		);
-	}
-	if (width >= 60) {
-		return layout(
-			leftFull,
-			[...context, segments.tokens.totalOnly].filter(Boolean),
-			separator,
-			width,
-		);
-	}
-	if (width >= 40) {
-		return layout(leftFull, context, separator, width);
-	}
-	return layout(leftMin, context, separator, width);
+function selectLayout(
+	layouts: FooterLayoutConfig[],
+	width: number,
+): FooterLayoutConfig {
+	return layouts.find((candidate) => width >= candidate.minWidth) ?? layouts[layouts.length - 1];
+}
+
+function resolveLayoutSegments(
+	segmentIds: FooterSegmentId[],
+	segments: SegmentMap,
+): string[] {
+	return segmentIds
+		.map((segmentId) => segments[segmentId])
+		.filter((segment): segment is string => Boolean(segment));
 }
