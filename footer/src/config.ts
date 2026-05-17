@@ -293,6 +293,7 @@ export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoad
 			// effectiveConfig (preset + user) overrides defaults;
 			// preset field always comes from resolvePresetId above
 			...effectiveConfig,
+			preset,
 			separator: typeof effectiveConfig.separator === "string"
 				? effectiveConfig.separator
 				: defaultConfig.separator,
