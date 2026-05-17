@@ -79,6 +79,7 @@ Example:
 
 ```json
 {
+  "preset": "compact",
   "enabled": true,
   "showGit": true,
   "showTokens": true,
@@ -126,6 +127,28 @@ Example:
   }
 }
 ```
+
+Preset example:
+
+```json
+{
+  "preset": "minimal",
+  "showGit": true
+}
+```
+
+Supported presets:
+
+| Preset | Description |
+|---|---|
+| `default` | Built-in footer behavior. |
+| `minimal` | Quiet model + context layout with git, directory, and tokens hidden. |
+| `compact` | Model, git, context, and total tokens with cache noise hidden. |
+| `dense` | Full information layout with cache read and write counts enabled. |
+| `focus` | Model + context only for low-distraction sessions. |
+| `muted` | Softer semantic colors while keeping default-style behavior. |
+
+Preset values are applied before user config, so explicit settings override the preset. Unknown preset names are ignored with a `/footer config` warning and default behavior is used.
 
 Supported layout segment IDs:
 
