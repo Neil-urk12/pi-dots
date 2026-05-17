@@ -288,6 +288,7 @@ export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoad
 	const effectiveConfig = mergeConfig(presetConfig, config);
 	const resolvedLayouts = resolveLayouts(effectiveConfig.layouts);
 	return {
+		config: {
 			...defaultConfig,
 			// effectiveConfig (preset + user) overrides defaults;
 			// preset field always comes from resolvePresetId above
@@ -319,8 +320,8 @@ export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoad
 				...(config.colors ?? {}),
 			},
 		},
-	loadedPaths: [],
-	warnings: [...warnings, ...resolvedLayouts.warnings],
+		loadedPaths: [],
+		warnings: [...warnings, ...resolvedLayouts.warnings],
 	};
 }
 
