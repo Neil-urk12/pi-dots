@@ -14,6 +14,17 @@ export const footerSegmentIds = [
 
 export type FooterSegmentId = (typeof footerSegmentIds)[number];
 
+export const footerPresetIds = [
+	"default",
+	"minimal",
+	"compact",
+	"dense",
+	"focus",
+	"muted",
+] as const;
+
+export type FooterPresetId = (typeof footerPresetIds)[number];
+
 export type FooterLayoutConfig = {
 	minWidth: number;
 	left: FooterSegmentId[];
@@ -21,6 +32,7 @@ export type FooterLayoutConfig = {
 };
 
 export type CleanFooterConfig = {
+	preset?: FooterPresetId | string;
 	enabled?: boolean;
 	showGit?: boolean;
 	showTokens?: boolean;
@@ -94,7 +106,81 @@ export const defaultFooterLayouts: FooterLayoutConfig[] = [
 	},
 ];
 
+const minimalLayouts: FooterLayoutConfig[] = [
+	{ minWidth: 0, left: ["model"], right: ["context"] },
+];
+
+const compactLayouts: FooterLayoutConfig[] = [
+	{
+		minWidth: 80,
+		left: ["model", "git"],
+		right: ["context", "tokensTotal"],
+	},
+	{ minWidth: 0, left: ["model"], right: ["context"] },
+];
+
+const denseLayouts: FooterLayoutConfig[] = [
+	{
+		minWidth: 100,
+		left: ["model", "directory", "git"],
+		right: ["context", "tokensFull"],
+	},
+	{
+		minWidth: 60,
+		left: ["model", "git"],
+		right: ["context", "tokensNoCache"],
+	},
+	{ minWidth: 0, left: ["model"], right: ["context"] },
+];
+
+const focusLayouts: FooterLayoutConfig[] = [
+	{ minWidth: 0, left: ["model"], right: ["context"] },
+];
+
+export const footerPresetConfigs: Record<FooterPresetId, CleanFooterConfig> = {
+	default: {},
+	minimal: {
+		separator: " · ",
+		showDirectory: false,
+		showGit: false,
+		showTokens: false,
+		layouts: minimalLayouts,
+	},
+	compact: {
+		separator: " · ",
+		showDirectory: false,
+		showCacheRead: false,
+		showCacheWrites: false,
+		layouts: compactLayouts,
+	},
+	dense: {
+		showCacheRead: true,
+		showCacheWrites: true,
+		layouts: denseLayouts,
+	},
+	focus: {
+		showDirectory: false,
+		showGit: false,
+		showTokens: false,
+		layouts: focusLayouts,
+	},
+	muted: {
+		colors: {
+			model: "muted",
+			directory: "dim",
+			git: "muted",
+			gitDirty: "warning",
+			contextNormal: "muted",
+			contextWarning: "warning",
+			contextDanger: "error",
+			tokens: "dim",
+			separator: "dim",
+		},
+	},
+};
+
 export const defaultConfig: ResolvedConfig = {
+	preset: "default",
 	enabled: true,
 	showGit: true,
 	showTokens: true,
@@ -121,7 +207,6 @@ export const defaultConfig: ResolvedConfig = {
 		tokens: "muted",
 		separator: "dim",
 	},
-
 };
 
 export function loadFooterConfig(
@@ -158,6 +243,22 @@ export function loadConfig(paths: string[]): ConfigLoadResult {
 	};
 }
 
+function resolvePresetId(
+	preset: CleanFooterConfig["preset"],
+	warnings: string[],
+): FooterPresetId {
+	if (preset === undefined || preset === "default") return "default";
+	if (typeof preset !== "string") {
+		warnings.push("preset must be a string; using default preset");
+		return "default";
+	}
+	if ((footerPresetIds as readonly string[]).includes(preset)) {
+		return preset as FooterPresetId;
+	}
+	warnings.push(`unknown preset '${preset}'; using default preset`);
+	return "default";
+}
+
 export function mergeConfig(
 	base: CleanFooterConfig,
 	override: CleanFooterConfig,
@@ -181,35 +282,45 @@ export function resolveConfig(config: CleanFooterConfig): ResolvedConfig {
 }
 
 export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoadResult {
-	const resolvedLayouts = resolveLayouts(config.layouts);
+	const warnings: string[] = [];
+	const preset = resolvePresetId(config.preset, warnings);
+	const presetConfig = footerPresetConfigs[preset];
+	const effectiveConfig = mergeConfig(presetConfig, config);
+	const resolvedLayouts = resolveLayouts(effectiveConfig.layouts);
 	return {
-		config: {
 			...defaultConfig,
-			...config,
-			separator: typeof config.separator === "string"
-				? config.separator
+			// effectiveConfig (preset + user) overrides defaults;
+			// preset field always comes from resolvePresetId above
+			...effectiveConfig,
+			separator: typeof effectiveConfig.separator === "string"
+				? effectiveConfig.separator
 				: defaultConfig.separator,
 			layouts: resolvedLayouts.layouts,
 			gitRefreshDebounceMs: positiveNumber(
-				config.gitRefreshDebounceMs,
+				effectiveConfig.gitRefreshDebounceMs,
 				defaultConfig.gitRefreshDebounceMs,
 			),
 			contextWarningPercent: percentNumber(
-				config.contextWarningPercent,
+				effectiveConfig.contextWarningPercent,
 				defaultConfig.contextWarningPercent,
 			),
 			contextDangerPercent: percentNumber(
-				config.contextDangerPercent,
+				effectiveConfig.contextDangerPercent,
 				defaultConfig.contextDangerPercent,
 			),
 			modelAliases: {
 				...defaultConfig.modelAliases,
+				...(presetConfig.modelAliases ?? {}),
 				...(config.modelAliases ?? {}),
 			},
-			colors: { ...defaultConfig.colors, ...(config.colors ?? {}) },
+			colors: {
+				...defaultConfig.colors,
+				...(presetConfig.colors ?? {}),
+				...(config.colors ?? {}),
+			},
 		},
-		loadedPaths: [],
-		warnings: resolvedLayouts.warnings,
+	loadedPaths: [],
+	warnings: [...warnings, ...resolvedLayouts.warnings],
 	};
 }
 
