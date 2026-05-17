@@ -79,14 +79,35 @@ Example:
 
 ```json
 {
+  "preset": "compact",
   "enabled": true,
   "showGit": true,
   "showTokens": true,
-  "showCache": false,
+  "showCache": true,
+  "showCacheRead": true,
+  "showCacheWrites": true,
   "showContext": true,
   "showDirectory": true,
   "showEffort": true,
   "gitRefreshDebounceMs": 500,
+  "separator": " • ",
+  "layouts": [
+    {
+      "minWidth": 100,
+      "left": ["model", "directory", "git"],
+      "right": ["context", "tokensFull"]
+    },
+    {
+      "minWidth": 60,
+      "left": ["model", "git"],
+      "right": ["context", "tokensTotal"]
+    },
+    {
+      "minWidth": 0,
+      "left": ["model"],
+      "right": ["context"]
+    }
+  ],
   "contextWarningPercent": 70,
   "contextDangerPercent": 85,
   "modelAliases": {
@@ -106,6 +127,40 @@ Example:
   }
 }
 ```
+
+Preset example:
+
+```json
+{
+  "preset": "minimal",
+  "showGit": true
+}
+```
+
+Supported presets:
+
+| Preset | Description |
+|---|---|
+| `default` | Built-in footer behavior. |
+| `minimal` | Quiet model + context layout with git, directory, and tokens hidden. |
+| `compact` | Model, git, context, and total tokens with cache noise hidden. |
+| `dense` | Full information layout with cache read and write counts enabled. |
+| `focus` | Model + context only for low-distraction sessions. |
+| `muted` | Softer semantic colors while keeping default-style behavior. |
+
+Preset values are applied before user config, so explicit settings override the preset. Unknown preset names are ignored with a `/footer config` warning and default behavior is used.
+
+Supported layout segment IDs:
+
+- `model` - model name plus thinking effort when `showEffort` is enabled
+- `directory` - current directory basename
+- `git` - git branch and dirty count
+- `context` - context usage
+- `tokensFull` - input, output, total, cache read, and cache write tokens
+- `tokensNoCache` - input, output, and total tokens
+- `tokensTotal` - total tokens only
+
+`layouts` are selected by the highest `minWidth` less than or equal to the terminal width. `showGit`, `showTokens`, `showContext`, `showDirectory`, and `showEffort` still act as global visibility controls. `showCache` is a deprecated global cache-token gate; use `showCacheRead` and `showCacheWrites` to hide cache read (`↯`) and write (`↥`) counts independently. Unknown or duplicate layout segments are omitted and reported by `/footer config`.
 
 Malformed JSON keeps defaults/last loaded behavior and reports an error through `/footer config` or at startup.
 

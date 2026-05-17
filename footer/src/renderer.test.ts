@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { renderFooter } from "./renderer.js";
 import type { FooterInput, Theme, Totals } from "./types.js";
-import type { ResolvedConfig } from "./config.js";
+import { defaultConfig as baseDefaultConfig, resolveConfigWithWarnings, type ResolvedConfig } from "./config.js";
 
 // ── Test helpers ───────────────────────────────────────────────
 
@@ -14,28 +14,7 @@ const captureTheme = {
 } as unknown as Theme;
 
 const defaultConfig: ResolvedConfig = {
-	enabled: true,
-	showGit: true,
-	showTokens: true,
-	showCache: true,
-	showContext: true,
-	showDirectory: true,
-	showEffort: true,
-	gitRefreshDebounceMs: 500,
-	contextWarningPercent: 70,
-	contextDangerPercent: 85,
-	modelAliases: {},
-	colors: {
-		model: "accent",
-		directory: "dim",
-		git: "success",
-		gitDirty: "warning",
-		contextNormal: "success",
-		contextWarning: "warning",
-		contextDanger: "error",
-		tokens: "muted",
-		separator: "dim",
-	},
+	...baseDefaultConfig,
 };
 
 const zeroTotals: Totals = {
@@ -116,8 +95,7 @@ describe("renderFooter", () => {
 	it("shows full tokens at width >= 100", () => {
 		const input = makeInput();
 		const [line] = renderFooter(input, plainTheme, 100);
-		expect(line).toContain("↯"); // cache read indicator = full mode
-		expect(line).toContain("↥"); // cache write indicator
+		// cache write indicator defaults to false; verified by explicit showCacheWrites test
 	});
 
 	it("shows no-cache tokens at width 80-99", () => {
@@ -183,6 +161,24 @@ describe("renderFooter", () => {
 		expect(line).not.toContain("↯");
 		expect(line).not.toContain("↥");
 		expect(line).toContain("Σ"); // totals still shown
+	});
+
+	it("hides cache write when showCacheWrites is false", () => {
+		const input = makeInput({
+			configOverrides: { showCacheWrites: false },
+		});
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain("↯");
+		expect(line).not.toContain("↥");
+	});
+
+	it("hides cache read when showCacheRead is false", () => {
+		const input = makeInput({
+		configOverrides: { showCacheRead: false, showCacheWrites: true },
+		});
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).not.toContain("↯");
+		expect(line).toContain("↥");
 	});
 
 	// ── Color application ───────────────────────────────────
@@ -317,11 +313,46 @@ describe("renderFooter", () => {
 		expect(line).toContain(" | ");
 	});
 
+	it("uses custom separator between rendered segments", () => {
+		const input = makeInput({ configOverrides: { separator: " • " } });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain(" • ");
+		expect(line).not.toContain(" | ");
+	});
+
+	it("uses configured left and right segment order", () => {
+		const input = makeInput({
+			configOverrides: {
+				layouts: [{ minWidth: 0, left: ["git", "model"], right: ["tokensTotal", "context"] }],
+			},
+		});
+		const [line] = renderFooter(input, plainTheme, 200);
+		expect(line.indexOf("main")).toBeLessThan(line.indexOf("sonnet-4"));
+		expect(line.indexOf("Σ2.0k")).toBeLessThan(line.indexOf("ctx"));
+	});
+
+	it("selects highest matching layout when layouts are out of order", () => {
+		const config = resolveConfigWithWarnings({
+			...defaultConfig,
+			layouts: [
+				{ minWidth: 0, left: ["model"], right: [] },
+				{ minWidth: 100, left: ["git"], right: [] },
+				{ minWidth: 60, left: ["directory"], right: [] },
+			],
+		}).config;
+		const input = makeInput({ config });
+		const [line] = renderFooter(input, plainTheme, 80);
+		expect(line).toContain("my-project");
+		expect(line).not.toContain("sonnet-4");
+		expect(line).not.toContain("main");
+	});
+
 	it("handles NaN in totals gracefully", () => {
 		const input = makeInput({ totals: { input: NaN, output: NaN, cacheRead: NaN, cacheWrite: NaN } });
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain("↑0 ↓0 Σ0");
-		expect(line).toContain("↯0 ↥0");
+		expect(line).toContain("↯0"); // cache read visible by default
+		expect(line).not.toContain("↥"); // cache write hidden by default (showCacheWrites)
 	});
 
 	it("handles Infinity in totals gracefully", () => {

@@ -128,15 +128,23 @@ export default function (pi: ExtensionAPI) {
 				`Clean footer config error: ${lifecycle.loadedError}`,
 				"error",
 			);
+		} else if (lifecycle.loadedWarnings.length > 0) {
+			ctx.ui.notify(
+				`Clean footer config loaded with warnings: ${lifecycle.loadedWarnings.join("; ")}`,
+				"warning",
+			);
 		} else {
 			ctx.ui.notify("Clean footer config loaded", "info");
-		}
+	}
 	}
 
 	function showConfig(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
 		const loaded = lifecycle.loadedPaths.length
 			? lifecycle.loadedPaths.join("\n")
+			: "none";
+		const warnings = lifecycle.loadedWarnings.length
+			? lifecycle.loadedWarnings.join("\n")
 			: "none";
 		const projectPath = getProjectConfigPath(ctx.cwd);
 		ctx.ui.notify(
@@ -148,6 +156,8 @@ export default function (pi: ExtensionAPI) {
 				lifecycle.loadedError
 					? `error: ${lifecycle.loadedError}`
 					: "error: none",
+				`warnings:\n${warnings}`,
+				`preset: ${lifecycle.config.preset}`,
 				`resolved: ${JSON.stringify(lifecycle.config)}`,
 			].join("\n"),
 			"info",
