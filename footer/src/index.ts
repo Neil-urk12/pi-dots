@@ -157,6 +157,7 @@ export default function (pi: ExtensionAPI) {
 					? `error: ${lifecycle.loadedError}`
 					: "error: none",
 				`warnings:\n${warnings}`,
+				`preset: ${lifecycle.config.preset}`,
 				`resolved: ${JSON.stringify(lifecycle.config)}`,
 			].join("\n"),
 			"info",
