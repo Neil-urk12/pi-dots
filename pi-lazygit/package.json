@@ -1,8 +1,16 @@
 {
   "name": "pi-lazygit",
   "version": "1.0.0",
-  "description": "Open lazygit in popup terminal via /lazygit or Ctrl+G",
+  "description": "Open lazygit in popup terminal via /lazygit or Ctrl+Shift+G",
   "pi": {
-    "extensions": ["./index.ts"]
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.6"
   }
 }
