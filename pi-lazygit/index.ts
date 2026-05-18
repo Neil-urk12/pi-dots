@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 export interface TUIController {
 	stop(): void;
@@ -38,7 +38,7 @@ export function runFullscreenProcess(
 	});
 }
 
-function launchLazygit(ctx: { hasUI: boolean; ui: any }) {
+function launchLazygit(ctx: ExtensionContext) {
 	if (!ctx.hasUI) {
 		ctx.ui.notify("lazygit requires TUI mode", "error");
 		return;
