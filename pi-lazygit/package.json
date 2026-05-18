@@ -1,6 +1,6 @@
 {
   "name": "@neilurk12/pi-lazygit",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Open lazygit in popup terminal via /lazygit or Ctrl+Shift+G",
   "type": "module",
   "keywords": [
@@ -8,7 +8,8 @@
     "pi-extension",
     "lazygit",
     "terminal",
-    "git"
+    "git",
+    "pi"
   ],
   "repository": {
     "type": "git",
