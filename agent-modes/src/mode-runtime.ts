@@ -91,7 +91,7 @@ export class ModeRuntimeController {
 
   constructor(catalog: ModeCatalog, options: ModeRuntimeControllerOptions = {}) {
     this.catalog = catalog;
-    this.defaultMode = options.defaultMode ?? "yolo";
+    this.defaultMode = options.defaultMode ?? "orchestrator";
     this.safeFallbackModes = options.safeFallbackModes ?? ["plan", "ask", "yolo"];
     this.currentMode = this.catalog.definitions.has(this.defaultMode)
       ? this.defaultMode
