@@ -32,4 +32,4 @@ Opens lazygit fullscreen in the current repo. Returns to pi when you quit (`q`).
 
 ## How it works
 
-Stops the TUI, spawns lazygit with inherited stdio (fullscreen takeover), then restarts the TUI on exit. Uses `spawnSync` so pi blocks until lazygit quits.
+Stops the TUI, spawns lazygit with inherited stdio (fullscreen takeover), then restarts the TUI on exit. Uses async `spawn` so the TUI event loop stays unblocked.
