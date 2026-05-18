@@ -1,6 +1,6 @@
 # pi-lazygit
 
-Pi extension that opens [lazygit](https://github.com/jesseduffield/lazygit) in a popup terminal.
+Lightweight Pi extension that opens [lazygit](https://github.com/jesseduffield/lazygit) in a popup terminal.
 
 ## Install
 
