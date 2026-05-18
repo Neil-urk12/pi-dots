@@ -5,14 +5,14 @@ Pi extension that opens [lazygit](https://github.com/jesseduffield/lazygit) in a
 ## Install
 
 ```bash
-pi install pi-lazygit
+pi install npm:@neilurk12/pi-lazygit
 ```
 
 Or add to your pi config manually:
 
 ```json
 {
-  "extensions": ["pi-lazygit"]
+  "extensions": ["@neilurk12/pi-lazygit"]
 }
 ```
 

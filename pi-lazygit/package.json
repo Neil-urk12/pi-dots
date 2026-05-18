@@ -1,5 +1,5 @@
 {
-  "name": "pi-lazygit",
+  "name": "@neilurk12/pi-lazygit",
   "version": "0.1.0",
   "description": "Open lazygit in popup terminal via /lazygit or Ctrl+Shift+G",
   "type": "module",
