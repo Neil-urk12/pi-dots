@@ -1,6 +1,43 @@
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
+interface TUIController {
+	stop(): void;
+	start(): void;
+	requestRender(force: boolean): void;
+}
+
+function runFullscreenProcess(
+	command: string,
+	args: string[],
+	tui: TUIController
+): Promise<void> {
+	return new Promise((resolve, reject) => {
+		tui.stop();
+		process.stdout.write("\x1b[2J\x1b[H");
+
+		let settled = false;
+		const finish = (err?: Error) => {
+			if (settled) return;
+			settled = true;
+			try {
+				tui.start();
+				tui.requestRender(true);
+			} catch {}
+			if (err) reject(err);
+			else resolve();
+		};
+
+		const child = spawn(command, args, {
+			stdio: "inherit",
+			env: process.env,
+		});
+
+		child.on("close", () => finish());
+		child.on("error", (err) => finish(err));
+	});
+}
+
 function launchLazygit(ctx: { hasUI: boolean; ui: any }) {
 	if (!ctx.hasUI) {
 		ctx.ui.notify("lazygit requires TUI mode", "error");
@@ -8,30 +45,12 @@ function launchLazygit(ctx: { hasUI: boolean; ui: any }) {
 	}
 
 	return ctx.ui.custom<null>((tui, _theme, _kb, done) => {
-		tui.stop();
-		process.stdout.write("\x1b[2J\x1b[H");
-
-		let settled = false;
-		const finish = () => {
-			if (settled) return;
-			settled = true;
-			try {
-				tui.start();
-				tui.requestRender(true);
-			} catch {}
-			done(null);
-		};
-
-		const child = spawn("lazygit", [], {
-			stdio: "inherit",
-			env: process.env,
-		});
-
-		child.on("close", finish);
-		child.on("error", (err) => {
-			finish();
-			ctx.ui.notify(`Failed to start lazygit: ${err.message}`, "error");
-		});
+		runFullscreenProcess("lazygit", [], tui)
+			.then(() => done(null))
+			.catch((err) => {
+				ctx.ui.notify(`Failed to start lazygit: ${err.message}`, "error");
+				done(null);
+			});
 
 		return { render: () => [], invalidate: () => {} };
 	});
