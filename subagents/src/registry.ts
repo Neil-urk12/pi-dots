@@ -55,6 +55,9 @@ export function loadAgents(extDir: string, config: ExtensionConfig): void {
 			.split(",")
 			.map((t) => t.trim())
 			.filter(Boolean);
+		const extensions = frontmatter.extensions
+			? frontmatter.extensions.split(",").map(e => e.trim()).filter(Boolean)
+			: [];
 		agents.push({
 			name: frontmatter.name,
 			description: frontmatter.description || "",
@@ -71,6 +74,7 @@ export function loadAgents(extDir: string, config: ExtensionConfig): void {
 			systemPrompt: body,
 			filePath,
 			useParentExtensions: frontmatter.useParentExtensions === "true",
+			extensions: extensions.length > 0 ? extensions : undefined,
 		});
 	}
 }

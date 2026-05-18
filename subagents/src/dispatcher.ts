@@ -6,6 +6,7 @@ import type {
 import { matchesKey } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 import type { AgentConfig, AgentProgress, AgentResult } from "./types";
+import { loadAgents } from "./registry";
 import { formatDuration, formatTokens } from "./format";
 import {
 	renderSubagentCall,
@@ -163,7 +164,6 @@ export function registerSubagentCommands(
 				label: `${m.provider}/${m.id}`,
 			}));
 
-			// Load current config for model overrides
 			const { loadConfig, saveConfig } = await import("./config");
 			const config = loadConfig(extDir);
 			const modelMap: Record<string, string> = {};
@@ -175,10 +175,45 @@ export function registerSubagentCommands(
 			let agentCursor = 0;
 			let modelCursor = 0;
 			let selectedAgent = "";
+			let searchQuery = "";
+
+			const filteredModels = () =>
+				searchQuery
+					? modelEntries.filter((m) =>
+							m.label
+								.toLowerCase()
+								.includes(searchQuery.toLowerCase()),
+						)
+					: modelEntries;
 
 			const findModelCursor = (label: string) => {
-				const idx = modelEntries.findIndex((m) => m.label === label);
+				const idx = filteredModels().findIndex(
+					(m) => m.label === label,
+				);
 				return idx >= 0 ? idx : 0;
+			};
+
+			const border = (lines: string[], width: number, theme: any) => {
+				const w = Math.min(width - 4, 72);
+				const top =
+					theme.fg("muted", "┌") +
+					theme.fg("muted", "─".repeat(w - 2)) +
+					theme.fg("muted", "┐");
+				const bottom =
+					theme.fg("muted", "└") +
+					theme.fg("muted", "─".repeat(w - 2)) +
+					theme.fg("muted", "┘");
+				const bordered = lines.map((line) => {
+					const stripped = line.replace(/\x1b\[[0-9;]*m/g, "");
+					const pad = Math.max(0, w - 2 - stripped.length);
+					return (
+						theme.fg("muted", "│") +
+						line +
+						" ".repeat(pad) +
+						theme.fg("muted", "│")
+					);
+				});
+				return [top, ...bordered, bottom];
 			};
 
 			await ctx.ui.custom<void>(
@@ -187,63 +222,77 @@ export function registerSubagentCommands(
 					let cachedLines: string[] | undefined;
 
 					const buildLines = (width: number): string[] => {
-						const lines: string[] = [];
+						const inner: string[] = [];
 
 						if (step === "agent") {
-							lines.push(
-								theme.fg("accent", theme.bold("  ⚡ Select Agent")),
+							inner.push(
+								theme.fg(
+									"accent",
+									theme.bold("  ⚡ Select Agent"),
+								),
 							);
-							lines.push(
+							inner.push(
 								theme.fg(
 									"muted",
 									"  Choose an agent to change its model",
 								),
 							);
-							lines.push("");
+							inner.push("");
 
 							for (let i = 0; i < agentNames.length; i++) {
 								const name = agentNames[i];
-								const current = modelMap[name] || "(default)";
+								const current =
+									modelMap[name] || "(default)";
 								const selected = i === agentCursor;
 								const prefix = selected
 									? theme.fg("accent", "▸ ")
 									: "  ";
 								const nameStr = selected
-									? theme.fg("accent", theme.bold(name))
+									? theme.fg(
+											"accent",
+											theme.bold(name),
+										)
 									: theme.fg("text", name);
 								const modelStr = theme.fg(
 									"muted",
 									` │ ${current}`,
 								);
-								lines.push(
+								inner.push(
 									`  ${prefix}${nameStr}${modelStr}`,
 								);
 							}
-							lines.push("");
-							lines.push(
+							inner.push("");
+							inner.push(
 								theme.fg(
 									"muted",
-									"  [↑↓] navigate │ [enter] select model │ [esc] close",
+									"  [↑↓] navigate │ [enter] select │ [esc] close",
 								),
 							);
 						} else {
-							lines.push(
+							const filtered = filteredModels();
+							inner.push(
 								theme.fg(
 									"accent",
-									theme.bold(`  ⚡ Model for ${selectedAgent}`),
+									theme.bold(
+										`  ⚡ Model for ${selectedAgent}`,
+									),
 								),
 							);
-							lines.push(
+							inner.push(
 								theme.fg(
 									"muted",
 									`  Current: ${modelMap[selectedAgent] || "(default)"}`,
 								),
 							);
-							lines.push("");
+							inner.push("");
+							inner.push(
+								`  ${theme.fg("muted", "Search: ")}${theme.fg("accent", searchQuery || "...")}${theme.fg("muted", "█")}`,
+							);
+							inner.push("");
 
 							const maxVisible = Math.min(
-								modelEntries.length,
-								15,
+								filtered.length,
+								12,
 							);
 							const startIdx = Math.max(
 								0,
@@ -254,52 +303,89 @@ export function registerSubagentCommands(
 								let i = startIdx;
 								i <
 								Math.min(
-									modelEntries.length,
+									filtered.length,
 									startIdx + maxVisible,
 								);
 								i++
 							) {
-								const m = modelEntries[i];
+								const m = filtered[i];
 								const selected = i === modelCursor;
 								const prefix = selected
 									? theme.fg("accent", "▸ ")
 									: "  ";
 								const label = selected
-									? theme.fg("accent", theme.bold(m.label))
+									? theme.fg(
+											"accent",
+											theme.bold(m.label),
+										)
 									: theme.fg("text", m.label);
 								const isCurrent =
-									m.label === modelMap[selectedAgent];
+									m.label ===
+									modelMap[selectedAgent];
 								const tag = isCurrent
 									? theme.fg("success", " ✓")
 									: "";
-								lines.push(`  ${prefix}${label}${tag}`);
+								inner.push(
+									`  ${prefix}${label}${tag}`,
+								);
 							}
 
-							if (modelEntries.length > maxVisible) {
-								lines.push(
+							if (filtered.length === 0) {
+								inner.push(
 									theme.fg(
 										"muted",
-										`  ... ${modelEntries.length - maxVisible} more`,
+										"  No models match search",
 									),
 								);
 							}
-							lines.push("");
-							lines.push(
+							if (filtered.length > maxVisible) {
+								inner.push(
+									theme.fg(
+										"muted",
+										`  ... ${filtered.length - maxVisible} more`,
+									),
+								);
+							}
+							inner.push("");
+							inner.push(
 								theme.fg(
 									"muted",
-									"  [↑↓] navigate │ [enter] set model │ [backspace] reset │ [esc] back",
+									"  [↑↓] nav │ [type] search │ [enter] set │ [ctrl+s] save │ [backspace] reset │ [esc] back",
 								),
 							);
 						}
 
-						return lines;
+						return border(inner, width, theme);
 					};
 
 					return {
 						handleInput(data: string) {
+							// Ctrl+S: save config and refresh agents
+							if (data === "\x13") {
+								saveConfig(extDir, config);
+								loadAgents(extDir, config);
+								// Update modelMap from refreshed config
+								for (const [k, v] of Object.entries(
+									config.models || {},
+								)) {
+									modelMap[k] =
+										typeof v === "string"
+											? v
+											: (v as any).model;
+								}
+								ctx.ui.notify(
+									"⚡ Config saved, agents refreshed",
+									"info",
+								);
+								cachedWidth = undefined;
+								cachedLines = undefined;
+								tui.requestRender();
+								return;
+							}
 							if (matchesKey(data, "escape")) {
 								if (step === "model") {
 									step = "agent";
+									searchQuery = "";
 								} else {
 									done(undefined);
 									return;
@@ -318,6 +404,7 @@ export function registerSubagentCommands(
 								} else if (matchesKey(data, "return")) {
 									selectedAgent =
 										agentNames[agentCursor];
+									searchQuery = "";
 									modelCursor = findModelCursor(
 										modelMap[selectedAgent] || "",
 									);
@@ -327,18 +414,18 @@ export function registerSubagentCommands(
 								}
 							} else {
 								if (matchesKey(data, "up")) {
+									const fm = filteredModels();
 									modelCursor =
-										(modelCursor -
-											1 +
-											modelEntries.length) %
-										modelEntries.length;
+										(modelCursor - 1 + fm.length) %
+										fm.length;
 								} else if (matchesKey(data, "down")) {
+									const fm = filteredModels();
 									modelCursor =
-										(modelCursor + 1) %
-										modelEntries.length;
+										(modelCursor + 1) % fm.length;
 								} else if (matchesKey(data, "return")) {
-									const chosen =
-										modelEntries[modelCursor];
+									const fm = filteredModels();
+									if (fm.length === 0) return;
+									const chosen = fm[modelCursor];
 									modelMap[selectedAgent] =
 										chosen.label;
 									if (!config.models)
@@ -359,22 +446,40 @@ export function registerSubagentCommands(
 										`⚡ ${selectedAgent} → ${chosen.label}`,
 										"info",
 									);
+									searchQuery = "";
 									step = "agent";
 								} else if (
 									matchesKey(data, "backspace") ||
 									matchesKey(data, "delete")
 								) {
-									delete modelMap[selectedAgent];
-									if (config.models)
-										delete config.models[
-											selectedAgent
-										];
-									saveConfig(extDir, config);
-									ctx.ui.notify(
-										`⚡ ${selectedAgent} → (default)`,
-										"info",
-									);
-									step = "agent";
+									if (searchQuery.length > 0) {
+										searchQuery = searchQuery.slice(
+											0,
+											-1,
+										);
+										modelCursor = Math.min(
+											modelCursor,
+											filteredModels().length - 1,
+										);
+									} else {
+										delete modelMap[selectedAgent];
+										if (config.models)
+											delete config.models[
+												selectedAgent
+											];
+										saveConfig(extDir, config);
+										ctx.ui.notify(
+											`⚡ ${selectedAgent} → (default)`,
+											"info",
+										);
+										step = "agent";
+									}
+								} else if (
+									data.length === 1 &&
+									data >= " "
+								) {
+									searchQuery += data;
+									modelCursor = 0;
 								} else {
 									return;
 								}
@@ -401,8 +506,8 @@ export function registerSubagentCommands(
 					overlay: true,
 					overlayOptions: {
 						anchor: "center",
-						maxHeight: "60%",
-						width: "60%",
+						maxHeight: "80%",
+						width: "80%",
 					},
 				},
 			);

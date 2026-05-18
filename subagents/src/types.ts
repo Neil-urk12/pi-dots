@@ -7,6 +7,7 @@ export interface AgentConfig {
 	systemPrompt: string;
 	filePath: string;
 	useParentExtensions?: boolean;
+	extensions?: string[];
 }
 
 export interface ToolEvent {
