@@ -15,8 +15,10 @@ function launchLazygit(ctx: { hasUI: boolean; ui: any }) {
 		const finish = () => {
 			if (settled) return;
 			settled = true;
-			tui.start();
-			tui.requestRender(true);
+			try {
+				tui.start();
+				tui.requestRender(true);
+			} catch {}
 			done(null);
 		};
 
