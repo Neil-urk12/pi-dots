@@ -20,10 +20,8 @@ export function runFullscreenProcess(
 		const finish = (err?: Error) => {
 			if (settled) return;
 			settled = true;
-			try {
-				tui.start();
-				tui.requestRender(true);
-			} catch {}
+			tui.start();
+			tui.requestRender(true);
 			if (err) reject(err);
 			else resolve();
 		};
