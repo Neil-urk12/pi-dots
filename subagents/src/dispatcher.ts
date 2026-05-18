@@ -1,7 +1,9 @@
+import * as path from "node:path";
 import type {
 	ExtensionAPI,
 	ExtensionContext,
 } from "@mariozechner/pi-coding-agent";
+import { matchesKey } from "@mariozechner/pi-tui";
 import { Type } from "typebox";
 import type { AgentConfig, AgentProgress, AgentResult } from "./types";
 import { formatDuration, formatTokens } from "./format";
@@ -19,6 +21,7 @@ export function registerSubagentCommands(
 	getAgents: () => AgentConfig[],
 	runner: SubagentRunner,
 	maxConcurrency: number,
+	extDir: string,
 ) {
 	async function runAgentCommand(
 		agentName: string,
@@ -133,6 +136,276 @@ export function registerSubagentCommands(
 		description: "Code changes — read, write, and edit files with safe bash",
 		handler: async (args, ctx) => {
 			await runAgentCommand("grind", args, ctx);
+		},
+	});
+
+	pi.registerCommand("sub-model", {
+		description: "Select model for subagents via TUI overlay",
+		handler: async (_args, ctx) => {
+			if (!ctx.hasUI) return;
+
+			const agents = getAgents();
+			if (agents.length === 0) {
+				ctx.ui.notify("No agents available.", "warning");
+				return;
+			}
+
+			const models = ctx.modelRegistry.getAvailable();
+			if (models.length === 0) {
+				ctx.ui.notify("No models with auth configured.", "warning");
+				return;
+			}
+
+			const agentNames = agents.map((a) => a.name);
+			const modelEntries = models.map((m) => ({
+				provider: m.provider,
+				id: m.id,
+				label: `${m.provider}/${m.id}`,
+			}));
+
+			// Load current config for model overrides
+			const { loadConfig, saveConfig } = await import("./config");
+			const config = loadConfig(extDir);
+			const modelMap: Record<string, string> = {};
+			for (const [k, v] of Object.entries(config.models || {})) {
+				modelMap[k] = typeof v === "string" ? v : (v as any).model;
+			}
+
+			let step: "agent" | "model" = "agent";
+			let agentCursor = 0;
+			let modelCursor = 0;
+			let selectedAgent = "";
+
+			const findModelCursor = (label: string) => {
+				const idx = modelEntries.findIndex((m) => m.label === label);
+				return idx >= 0 ? idx : 0;
+			};
+
+			await ctx.ui.custom<void>(
+				(tui, theme, _kb, done) => {
+					let cachedWidth: number | undefined;
+					let cachedLines: string[] | undefined;
+
+					const buildLines = (width: number): string[] => {
+						const lines: string[] = [];
+
+						if (step === "agent") {
+							lines.push(
+								theme.fg("accent", theme.bold("  ⚡ Select Agent")),
+							);
+							lines.push(
+								theme.fg(
+									"muted",
+									"  Choose an agent to change its model",
+								),
+							);
+							lines.push("");
+
+							for (let i = 0; i < agentNames.length; i++) {
+								const name = agentNames[i];
+								const current = modelMap[name] || "(default)";
+								const selected = i === agentCursor;
+								const prefix = selected
+									? theme.fg("accent", "▸ ")
+									: "  ";
+								const nameStr = selected
+									? theme.fg("accent", theme.bold(name))
+									: theme.fg("text", name);
+								const modelStr = theme.fg(
+									"muted",
+									` │ ${current}`,
+								);
+								lines.push(
+									`  ${prefix}${nameStr}${modelStr}`,
+								);
+							}
+							lines.push("");
+							lines.push(
+								theme.fg(
+									"muted",
+									"  [↑↓] navigate │ [enter] select model │ [esc] close",
+								),
+							);
+						} else {
+							lines.push(
+								theme.fg(
+									"accent",
+									theme.bold(`  ⚡ Model for ${selectedAgent}`),
+								),
+							);
+							lines.push(
+								theme.fg(
+									"muted",
+									`  Current: ${modelMap[selectedAgent] || "(default)"}`,
+								),
+							);
+							lines.push("");
+
+							const maxVisible = Math.min(
+								modelEntries.length,
+								15,
+							);
+							const startIdx = Math.max(
+								0,
+								modelCursor - maxVisible + 2,
+							);
+
+							for (
+								let i = startIdx;
+								i <
+								Math.min(
+									modelEntries.length,
+									startIdx + maxVisible,
+								);
+								i++
+							) {
+								const m = modelEntries[i];
+								const selected = i === modelCursor;
+								const prefix = selected
+									? theme.fg("accent", "▸ ")
+									: "  ";
+								const label = selected
+									? theme.fg("accent", theme.bold(m.label))
+									: theme.fg("text", m.label);
+								const isCurrent =
+									m.label === modelMap[selectedAgent];
+								const tag = isCurrent
+									? theme.fg("success", " ✓")
+									: "";
+								lines.push(`  ${prefix}${label}${tag}`);
+							}
+
+							if (modelEntries.length > maxVisible) {
+								lines.push(
+									theme.fg(
+										"muted",
+										`  ... ${modelEntries.length - maxVisible} more`,
+									),
+								);
+							}
+							lines.push("");
+							lines.push(
+								theme.fg(
+									"muted",
+									"  [↑↓] navigate │ [enter] set model │ [backspace] reset │ [esc] back",
+								),
+							);
+						}
+
+						return lines;
+					};
+
+					return {
+						handleInput(data: string) {
+							if (matchesKey(data, "escape")) {
+								if (step === "model") {
+									step = "agent";
+								} else {
+									done(undefined);
+									return;
+								}
+							} else if (step === "agent") {
+								if (matchesKey(data, "up")) {
+									agentCursor =
+										(agentCursor -
+											1 +
+											agentNames.length) %
+										agentNames.length;
+								} else if (matchesKey(data, "down")) {
+									agentCursor =
+										(agentCursor + 1) %
+										agentNames.length;
+								} else if (matchesKey(data, "return")) {
+									selectedAgent =
+										agentNames[agentCursor];
+									modelCursor = findModelCursor(
+										modelMap[selectedAgent] || "",
+									);
+									step = "model";
+								} else {
+									return;
+								}
+							} else {
+								if (matchesKey(data, "up")) {
+									modelCursor =
+										(modelCursor -
+											1 +
+											modelEntries.length) %
+										modelEntries.length;
+								} else if (matchesKey(data, "down")) {
+									modelCursor =
+										(modelCursor + 1) %
+										modelEntries.length;
+								} else if (matchesKey(data, "return")) {
+									const chosen =
+										modelEntries[modelCursor];
+									modelMap[selectedAgent] =
+										chosen.label;
+									if (!config.models)
+										config.models = {};
+									const existing =
+										config.models[selectedAgent];
+									if (
+										typeof existing === "object" &&
+										existing !== null
+									) {
+										existing.model = chosen.label;
+									} else {
+										config.models[selectedAgent] =
+											chosen.label;
+									}
+									saveConfig(extDir, config);
+									ctx.ui.notify(
+										`⚡ ${selectedAgent} → ${chosen.label}`,
+										"info",
+									);
+									step = "agent";
+								} else if (
+									matchesKey(data, "backspace") ||
+									matchesKey(data, "delete")
+								) {
+									delete modelMap[selectedAgent];
+									if (config.models)
+										delete config.models[
+											selectedAgent
+										];
+									saveConfig(extDir, config);
+									ctx.ui.notify(
+										`⚡ ${selectedAgent} → (default)`,
+										"info",
+									);
+									step = "agent";
+								} else {
+									return;
+								}
+							}
+
+							cachedWidth = undefined;
+							cachedLines = undefined;
+							tui.requestRender();
+						},
+						invalidate() {
+							cachedWidth = undefined;
+							cachedLines = undefined;
+						},
+						render(width: number): string[] {
+							if (cachedLines && cachedWidth === width)
+								return cachedLines;
+							cachedLines = buildLines(width);
+							cachedWidth = width;
+							return cachedLines;
+						},
+					};
+				},
+				{
+					overlay: true,
+					overlayOptions: {
+						anchor: "center",
+						maxHeight: "60%",
+						width: "60%",
+					},
+				},
+			);
 		},
 	});
 

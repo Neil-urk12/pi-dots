@@ -3,6 +3,7 @@ export interface AgentConfig {
 	description: string;
 	tools: string[];
 	model: string;
+	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 	systemPrompt: string;
 	filePath: string;
 	useParentExtensions?: boolean;
@@ -51,5 +52,5 @@ export interface Details {
 
 export interface ExtensionConfig {
 	maxConcurrency?: number;
-	models?: Record<string, string>;
+	models?: Record<string, string | { model: string; thinking: string }>;
 }

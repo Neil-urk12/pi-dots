@@ -32,7 +32,15 @@ export function unregisterAgent(name: string): void {
 
 export function loadAgents(extDir: string, config: ExtensionConfig): void {
 	agents = [];
-	const modelDefaults = { ...DEFAULT_MODELS, ...config.models };
+	const modelDefaults: Record<string, string> = {
+		...DEFAULT_MODELS,
+		...Object.fromEntries(
+			Object.entries(config.models || {}).map(([k, v]) => [
+				k,
+				typeof v === "string" ? v : v.model,
+			]),
+		),
+	};
 	const agentsDir = path.join(extDir, "agents");
 	if (!fs.existsSync(agentsDir)) return;
 
@@ -55,6 +63,11 @@ export function loadAgents(extDir: string, config: ExtensionConfig): void {
 				frontmatter.model ||
 				modelDefaults[frontmatter.name] ||
 				"anthropic/claude-sonnet-4-6",
+			thinking:
+				(frontmatter.thinking ??
+				(typeof (config.models as any)[frontmatter.name] === "object"
+					? (config.models as any)[frontmatter.name].thinking
+					: undefined)) as AgentConfig["thinking"],
 			systemPrompt: body,
 			filePath,
 			useParentExtensions: frontmatter.useParentExtensions === "true",
