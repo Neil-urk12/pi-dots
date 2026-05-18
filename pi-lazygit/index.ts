@@ -11,21 +11,23 @@ function launchLazygit(ctx: { hasUI: boolean; ui: any }) {
 		tui.stop();
 		process.stdout.write("\x1b[2J\x1b[H");
 
+		let settled = false;
+		const finish = () => {
+			if (settled) return;
+			settled = true;
+			tui.start();
+			tui.requestRender(true);
+			done(null);
+		};
+
 		const child = spawn("lazygit", [], {
 			stdio: "inherit",
 			env: process.env,
 		});
 
-		child.on("close", () => {
-			tui.start();
-			tui.requestRender(true);
-			done(null);
-		});
-
+		child.on("close", finish);
 		child.on("error", (err) => {
-			tui.start();
-			tui.requestRender(true);
-			done(null);
+			finish();
 			ctx.ui.notify(`Failed to start lazygit: ${err.message}`, "error");
 		});
 
