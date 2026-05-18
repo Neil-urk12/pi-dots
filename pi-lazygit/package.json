@@ -1,16 +1,46 @@
 {
   "name": "pi-lazygit",
-  "version": "1.0.0",
+  "version": "0.1.0",
   "description": "Open lazygit in popup terminal via /lazygit or Ctrl+Shift+G",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "lazygit",
+    "terminal",
+    "git"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Neil-urk12/pi-dots.git"
+  },
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ]
   },
   "scripts": {
-    "test": "vitest run"
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
     "vitest": "^4.1.6"
   }
 }

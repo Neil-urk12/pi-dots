@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { runFullscreenProcess, type TUIController } from "./index";
+import { runFullscreenProcess, type TUIController } from "./src/index";
 
 function mockTUI(): TUIController & { calls: string[] } {
 	const calls: string[] = [];
@@ -96,7 +96,7 @@ describe("extension registration", () => {
 
 	it("registers command and shortcut", async () => {
 		const pi = mockPi();
-		const register = (await import("./index")).default;
+		const register = (await import("./src/index")).default;
 		register(pi as any);
 		expect(pi.registerCommand).toHaveBeenCalledWith("lazygit", expect.objectContaining({
 			description: expect.any(String),
@@ -110,7 +110,7 @@ describe("extension registration", () => {
 
 	it("command handler launches lazygit", async () => {
 		const pi = mockPi();
-		const register = (await import("./index")).default;
+		const register = (await import("./src/index")).default;
 		register(pi as any);
 		const handler = pi.registerCommand.mock.calls[0][1].handler;
 		const ctx = mockCtx();
@@ -122,7 +122,7 @@ describe("extension registration", () => {
 
 	it("shortcut handler launches lazygit", async () => {
 		const pi = mockPi();
-		const register = (await import("./index")).default;
+		const register = (await import("./src/index")).default;
 		register(pi as any);
 		const handler = pi.registerShortcut.mock.calls[0][1].handler;
 		const ctx = mockCtx();
@@ -132,7 +132,7 @@ describe("extension registration", () => {
 
 	it("notifies error when not in TUI mode", async () => {
 		const pi = mockPi();
-		const register = (await import("./index")).default;
+		const register = (await import("./src/index")).default;
 		register(pi as any);
 		const handler = pi.registerCommand.mock.calls[0][1].handler;
 		const ctx = mockCtx(false);
@@ -146,7 +146,7 @@ describe("extension registration", () => {
 
 	it("notifies error on spawn failure", async () => {
 		const pi = mockPi();
-		const register = (await import("./index")).default;
+		const register = (await import("./src/index")).default;
 		register(pi as any);
 		const handler = pi.registerCommand.mock.calls[0][1].handler;
 		const ctx = mockCtx();
