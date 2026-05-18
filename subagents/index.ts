@@ -60,5 +60,5 @@ export default function (pi: ExtensionAPI) {
 		customToolExtensions: CUSTOM_TOOL_EXTENSIONS,
 	});
 
-	registerSubagentCommands(pi, getAgents, runner, maxConcurrency);
+	registerSubagentCommands(pi, getAgents, runner, maxConcurrency, extDir);
 }
