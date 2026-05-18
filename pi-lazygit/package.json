@@ -1,0 +1,8 @@
+{
+  "name": "pi-lazygit",
+  "version": "1.0.0",
+  "description": "Open lazygit in popup terminal via /lazygit or Ctrl+G",
+  "pi": {
+    "extensions": ["./index.ts"]
+  }
+}
