@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 function launchLazygit(ctx: { hasUI: boolean; ui: any }) {
@@ -7,19 +7,28 @@ function launchLazygit(ctx: { hasUI: boolean; ui: any }) {
 		return;
 	}
 
-	ctx.ui.custom<null>((tui, _theme, _kb, done) => {
+	return ctx.ui.custom<null>((tui, _theme, _kb, done) => {
 		tui.stop();
 		process.stdout.write("\x1b[2J\x1b[H");
 
-		spawnSync("lazygit", [], {
+		const child = spawn("lazygit", [], {
 			stdio: "inherit",
 			env: process.env,
 		});
 
-		tui.start();
-		tui.requestRender(true);
+		child.on("close", () => {
+			tui.start();
+			tui.requestRender(true);
+			done(null);
+		});
 
-		done(null);
+		child.on("error", (err) => {
+			tui.start();
+			tui.requestRender(true);
+			done(null);
+			ctx.ui.notify(`Failed to start lazygit: ${err.message}`, "error");
+		});
+
 		return { render: () => [], invalidate: () => {} };
 	});
 }
@@ -28,14 +37,14 @@ export default function (pi: ExtensionAPI) {
 	pi.registerCommand("lazygit", {
 		description: "Open lazygit in popup terminal",
 		handler: async (_args, ctx) => {
-			launchLazygit(ctx);
+			await launchLazygit(ctx);
 		},
 	});
 
 	pi.registerShortcut("ctrl+shift+g", {
 		description: "Open lazygit",
 		handler: async (ctx) => {
-			launchLazygit(ctx);
+			await launchLazygit(ctx);
 		},
 	});
 }
