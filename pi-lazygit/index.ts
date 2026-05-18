@@ -1,13 +1,13 @@
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
-interface TUIController {
+export interface TUIController {
 	stop(): void;
 	start(): void;
 	requestRender(force: boolean): void;
 }
 
-function runFullscreenProcess(
+export function runFullscreenProcess(
 	command: string,
 	args: string[],
 	tui: TUIController
