@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -10,6 +10,7 @@ import {
 } from "@mariozechner/pi-coding-agent";
 import type { AgentConfig, AgentProgress, AgentResult } from "./types";
 import { extractToolArgsPreview } from "./format";
+import { resolveProviderExtension } from "./provider-resolver";
 
 export interface RunnerOptions {
 	piBin: { command: string; baseArgs: string[] };
@@ -58,7 +59,7 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		agent: AgentConfig,
 		task: string,
 		_cwd: string,
-	): Promise<{ args: string[]; tempDir: string }> {
+	): Promise<{ args: string[]; tempDir: string; providerExt: string | undefined }> {
 		const piBin = options.piBin;
 		const tempDir = await fs.promises.mkdtemp(
 			path.join(os.tmpdir(), "pi-sub-"),
@@ -85,6 +86,7 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		// Separate builtin tools from custom tools
 		const builtinTools: string[] = [];
 		const extensionPaths = new Set<string>();
+		let providerExt: string | undefined;
 
 		for (const tool of agent.tools) {
 			if (options.builtinTools.has(tool)) {
@@ -94,8 +96,25 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 			}
 		}
 
+		// Add explicitly declared extensions from agent frontmatter
+		if (agent.extensions) {
+			for (const ext of agent.extensions) {
+				extensionPaths.add(ext);
+			}
+		}
+
 		if (!agent.useParentExtensions) {
 			args.push("--no-extensions");
+			// Auto-include extension that provides the agent's model provider
+			const resolved = await resolveProviderExtension(
+				agent.model,
+				options.piBin.command,
+				options.piBin.baseArgs,
+			);
+			if (resolved) {
+				providerExt = resolved;
+				extensionPaths.add(resolved);
+			}
 		}
 
 		if (builtinTools.length > 0) {
@@ -130,7 +149,32 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 			args.push(`Task: ${task}`);
 		}
 
-		return { args: [piBin.command, ...args], tempDir };
+		return { args: [piBin.command, ...args], tempDir, providerExt };
+	}
+
+	/**
+	 * Wait for a model to become available in pi's model registry.
+	 * Polls `pi --list-models` until the model appears or timeout.
+	 */
+	async function waitForModel(
+		model: string,
+		providerExt: string,
+		timeoutMs = 15000,
+	): Promise<void> {
+		const { command, baseArgs } = options.piBin;
+		const deadline = Date.now() + timeoutMs;
+		const pollInterval = 1000;
+
+		while (Date.now() < deadline) {
+			try {
+				const cmd = [command, ...baseArgs, "--no-extensions", "--extension", providerExt, "--list-models"].join(" ");
+				const output = execSync(cmd, { encoding: "utf-8", timeout: 5000 });
+				if (output.includes(model)) return;
+			} catch {
+				// pi list failed — retry
+			}
+			await new Promise((r) => setTimeout(r, pollInterval));
+		}
 	}
 
 	function extractTextFromContent(content: unknown): string {
@@ -152,7 +196,13 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		signal?: AbortSignal,
 		onUpdate?: (progress: AgentProgress) => void,
 	): Promise<AgentResult> {
-		const { args, tempDir } = await buildPiArgs(agent, task, cwd);
+		const { args, tempDir, providerExt } = await buildPiArgs(agent, task, cwd);
+
+		// Wait for model to be available if extension-provided (cold-start mitigation)
+		if (providerExt) {
+			await waitForModel(agent.model, providerExt);
+		}
+
 		const command = args[0];
 		const spawnArgs = args.slice(1);
 
