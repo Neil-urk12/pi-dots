@@ -30,3 +30,10 @@ export function loadConfig(extDir: string): ExtensionConfig {
 
 	return {};
 }
+
+export function saveConfig(extDir: string, config: ExtensionConfig): void {
+	const configPath = path.join(extDir, "config.json");
+	try {
+		fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + "\n", "utf-8");
+	} catch {}
+}

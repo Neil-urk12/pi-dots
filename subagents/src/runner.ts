@@ -110,6 +110,10 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		}
 
 		args.push("--model", agent.model);
+
+		if (agent.thinking) {
+			args.push("--thinking", agent.thinking);
+		}
 		args.push("--append-system-prompt", promptPath);
 
 		// Handle long tasks by writing to file
