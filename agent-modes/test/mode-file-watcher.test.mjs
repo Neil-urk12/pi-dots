@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,7 +22,7 @@ test("hasChanges returns false when no files are newer than since", async () => 
     const watcher = new ModeFileWatcher(fx.modesDir, fx.configPath);
     const since = Date.now();
     const result = await watcher.hasChanges(since);
-    assert.equal(result, false);
+    expect(result).toBe(false);
   } finally {
     await fx.cleanup();
   }
@@ -37,7 +36,7 @@ test("hasChanges returns true when a mode file is newer than since", async () =>
     await setTimeout(10);
     await writeFile(join(fx.modesDir, "plan.md"), "---\nmode: plan\n---\n# UPDATED\n");
     const result = await watcher.hasChanges(since);
-    assert.equal(result, true);
+    expect(result).toBe(true);
   } finally {
     await fx.cleanup();
   }
@@ -51,7 +50,7 @@ test("hasChanges returns true when user config is newer than since", async () =>
     await setTimeout(10);
     await writeFile(fx.configPath, "yolo:\n  border_label: FOO\n");
     const result = await watcher.hasChanges(since);
-    assert.equal(result, true);
+    expect(result).toBe(true);
   } finally {
     await fx.cleanup();
   }
@@ -62,7 +61,7 @@ test("hasChanges returns false when modesDir does not exist", async () => {
   try {
     const watcher = new ModeFileWatcher(join(fx.root, "nonexistent"), join(fx.root, "nonexistent.yaml"));
     const result = await watcher.hasChanges(0);
-    assert.equal(result, false);
+    expect(result).toBe(false);
   } finally {
     await fx.cleanup();
   }
@@ -76,7 +75,7 @@ test("hasChanges short-circuits on first changed file", async () => {
     await setTimeout(10);
     await writeFile(fx.configPath, "ask:\n  border_label: BAR\n");
     const result = await watcher.hasChanges(since);
-    assert.equal(result, true);
+    expect(result).toBe(true);
   } finally {
     await fx.cleanup();
   }

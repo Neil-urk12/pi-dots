@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 
 import { evaluateToolCall } from "../dist/mode-tool-policy.js";
 
@@ -9,8 +8,8 @@ function decision(input) {
 
 test("fail-closed blocks mutating tools when mode definition missing", () => {
   const result = decision({ mode: "plan", definition: undefined, toolName: "edit" });
-  assert.equal(result.block, true);
-  assert.match(result.reason, /fail-closed/);
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/fail-closed/);
 });
 
 test("fail-closed allows safe read-only bash", () => {
@@ -21,7 +20,7 @@ test("fail-closed allows safe read-only bash", () => {
     input: { command: "ls -la" },
   });
 
-  assert.deepEqual(result, { block: false });
+  expect(result).toEqual({ block: false });
 });
 
 test("fail-closed blocks unsafe bash", () => {
@@ -32,8 +31,8 @@ test("fail-closed blocks unsafe bash", () => {
     input: { command: "git push origin main" },
   });
 
-  assert.equal(result.block, true);
-  assert.match(result.reason, /fail-closed blocked unsafe command/);
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/fail-closed blocked unsafe command/);
 });
 
 test("enabled_tools allowlist blocks tool before bash policy", () => {
@@ -43,8 +42,8 @@ test("enabled_tools allowlist blocks tool before bash policy", () => {
     toolName: "write",
   });
 
-  assert.equal(result.block, true);
-  assert.match(result.reason, /blocks tool: write/);
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/blocks tool: write/);
 });
 
 test("strict_readonly blocks non-safelisted bash", () => {
@@ -55,8 +54,8 @@ test("strict_readonly blocks non-safelisted bash", () => {
     input: { command: "npm test" },
   });
 
-  assert.equal(result.block, true);
-  assert.match(result.reason, /Allowed read-only commands only/);
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/Allowed read-only commands only/);
 });
 
 test("non_destructive allows development bash", () => {
@@ -67,7 +66,7 @@ test("non_destructive allows development bash", () => {
     input: { command: "npm test" },
   });
 
-  assert.deepEqual(result, { block: false });
+  expect(result).toEqual({ block: false });
 });
 
 test("non_destructive blocks destructive bash", () => {
@@ -78,8 +77,8 @@ test("non_destructive blocks destructive bash", () => {
     input: { command: "rm -rf dist" },
   });
 
-  assert.equal(result.block, true);
-  assert.match(result.reason, /blocked destructive command/);
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/blocked destructive command/);
 });
 
 test("off policy allows destructive bash when tool is enabled", () => {
@@ -90,7 +89,7 @@ test("off policy allows destructive bash when tool is enabled", () => {
     input: { command: "git push origin main" },
   });
 
-  assert.deepEqual(result, { block: false });
+  expect(result).toEqual({ block: false });
 });
 
 test("mode fallback matrix applies when bash_policy omitted", () => {
@@ -108,8 +107,8 @@ test("mode fallback matrix applies when bash_policy omitted", () => {
     input: { command: "npm test" },
   });
 
-  assert.equal(planResult.block, true);
-  assert.equal(codeResult.block, false);
+  expect(planResult.block).toBe(true);
+  expect(codeResult.block).toBe(false);
 });
 
 test("curl read-only usage is allowed in strict_readonly", () => {
@@ -134,7 +133,7 @@ test("curl read-only usage is allowed in strict_readonly", () => {
       toolName: "bash",
       input: { command: cmd },
     });
-    assert.deepEqual(result, { block: false }, `curl command should be allowed: ${cmd}`);
+    expect(result).toEqual({ block: false }, `curl command should be allowed: ${cmd}`);
   }
 });
 
@@ -160,7 +159,7 @@ test("curl file-writing flags are blocked in strict_readonly", () => {
       toolName: "bash",
       input: { command: cmd },
     });
-    assert.equal(result.block, true, `curl command should be blocked: ${cmd}`);
-    assert.match(result.reason, /Allowed read-only commands only/);
+    expect(result.block).toBe(true, `curl command should be blocked: ${cmd}`);
+    expect(result.reason).toMatch(/Allowed read-only commands only/);
   }
 });

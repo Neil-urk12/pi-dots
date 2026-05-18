@@ -1,5 +1,4 @@
-import test from "node:test";
-import assert from "node:assert/strict";
+import { test, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -43,10 +42,10 @@ test("buildModeCatalog builds catalog from parsed documents without file system"
     now: () => 456,
   });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.catalog.loadedAt, 456);
-  assert.deepEqual([...result.catalog.definitions.keys()].sort(), [...requiredModes, "review"].sort());
-  assert.deepEqual(result.catalog.definitions.get("review").enabled_tools, ["read"]);
+  expect(result.ok).toBe(true);
+  expect(result.catalog.loadedAt).toBe(456);
+  expect([...result.catalog.definitions.keys()].sort()).toEqual([...requiredModes, "review"].sort());
+  expect(result.catalog.definitions.get("review").enabled_tools).toEqual(["read"]);
 });
 
 test("buildModeCatalog preserves current permissive user override semantics", () => {
@@ -62,11 +61,11 @@ test("buildModeCatalog preserves current permissive user override semantics", ()
     },
   });
 
-  assert.equal(result.ok, true);
-  assert.equal(result.catalog.definitions.get("plan").border_label, " SAFE ");
-  assert.equal(result.catalog.definitions.get("plan").border_style, "custom-style");
-  assert.match(result.diagnostics.map(d => d.message).join("\n"), /Unknown user override ignored: unknown/);
-  assert.match(result.diagnostics.map(d => d.message).join("\n"), /User override for 'ask' must be an object/);
+  expect(result.ok).toBe(true);
+  expect(result.catalog.definitions.get("plan").border_label).toBe(" SAFE ");
+  expect(result.catalog.definitions.get("plan").border_style).toBe("custom-style");
+  expect(result.diagnostics.map(d => d.message).join("\n")).toMatch(/Unknown user override ignored: unknown/);
+  expect(result.diagnostics.map(d => d.message).join("\n")).toMatch(/User override for 'ask' must be an object/);
 });
 
 test("loads required built-ins plus extra markdown modes", async () => {
@@ -74,9 +73,9 @@ test("loads required built-ins plus extra markdown modes", async () => {
   try {
     await writeFile(join(fx.modesDir, "review.md"), `---\nmode: review\nenabled_tools:\n  - read\ndescription: Review\nborder_style: accent\n---\n# Review\n`);
     const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath, now: () => 123 });
-    assert.equal(result.ok, true);
-    assert.equal(result.catalog.loadedAt, 123);
-    assert.deepEqual([...result.catalog.definitions.keys()].sort(), [...requiredModes, "review"].sort());
+    expect(result.ok).toBe(true);
+    expect(result.catalog.loadedAt).toBe(123);
+    expect([...result.catalog.definitions.keys()].sort()).toEqual([...requiredModes, "review"].sort());
   } finally {
     await fx.cleanup();
   }
@@ -87,8 +86,8 @@ test("fails closed when required built-in is missing", async () => {
   try {
     await rm(join(fx.modesDir, "plan.md"));
     const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
-    assert.equal(result.ok, false);
-    assert.match(result.diagnostics.map(d => d.message).join("\n"), /Required built-in mode missing: plan/);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.map(d => d.message).join("\n")).toMatch(/Required built-in mode missing: plan/);
   } finally {
     await fx.cleanup();
   }
@@ -99,10 +98,10 @@ test("applies user overrides only to existing modes", async () => {
   try {
     await writeFile(fx.userConfigPath, `plan:\n  border_label: " SAFE "\nunknown:\n  border_label: " NOPE "\n`);
     const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
-    assert.equal(result.ok, true);
-    assert.equal(result.catalog.definitions.get("plan").border_label, " SAFE ");
-    assert.equal(result.catalog.definitions.has("unknown"), false);
-    assert.match(result.diagnostics.map(d => d.message).join("\n"), /Unknown user override ignored: unknown/);
+    expect(result.ok).toBe(true);
+    expect(result.catalog.definitions.get("plan").border_label).toBe(" SAFE ");
+    expect(result.catalog.definitions.has("unknown")).toBe(false);
+    expect(result.diagnostics.map(d => d.message).join("\n")).toMatch(/Unknown user override ignored: unknown/);
   } finally {
     await fx.cleanup();
   }
@@ -113,9 +112,9 @@ test("invalid extra mode is warning, not catalog failure", async () => {
   try {
     await writeFile(join(fx.modesDir, "bad.md"), `---\nmode: wrong\n---\n# Bad\n`);
     const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
-    assert.equal(result.ok, true);
-    assert.equal(result.catalog.definitions.has("bad"), false);
-    assert.match(result.diagnostics.map(d => d.message).join("\n"), /Mode 'bad' load error/);
+    expect(result.ok).toBe(true);
+    expect(result.catalog.definitions.has("bad")).toBe(false);
+    expect(result.diagnostics.map(d => d.message).join("\n")).toMatch(/Mode 'bad' load error/);
   } finally {
     await fx.cleanup();
   }

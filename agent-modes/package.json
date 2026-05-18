@@ -1,47 +1,60 @@
 {
   "name": "@neilurk12/pi-agent-modes",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Multi-mode extension for pi coding agent: yolo, plan, ask, orchestrator",
-  "main": "dist/index.js",
+  "type": "module",
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "modes",
+    "agent",
+    "yolo",
+    "plan",
+    "ask",
+    "orchestrator"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Neil-urk12/pi-dots.git"
   },
-  "types": "dist/index.d.ts",
-  "type": "module",
+  "license": "MIT",
   "files": [
     "dist",
     "modes",
     "README.md",
     "LICENSE"
   ],
-  "scripts": {
-    "build": "tsc",
-    "test": "npm run build && node --test test/*.test.mjs",
-    "watch": "tsc --watch",
-    "prepublishOnly": "npm run build"
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
   },
-  "keywords": [
-    "pi",
-    "coding-agent",
-    "extension",
-    "modes",
-    "ask",
-    "yolo",
-    "plan",
-    "orchestrator"
-  ],
-  "license": "MIT",
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": ">=0.1.0"
+    "@earendil-works/pi-coding-agent": "*"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "latest",
-    "@earendil-works/pi-tui": "latest",
-    "@types/js-yaml": "^4.0.9",
-    "typescript": "^6.0.3"
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
   },
   "dependencies": {
     "js-yaml": "^4.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }
