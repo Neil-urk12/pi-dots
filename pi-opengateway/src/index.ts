@@ -46,8 +46,9 @@ export default function (pi: ExtensionAPI) {
   if (!config) {
     pi.registerCommand("opengateway", {
       description: "Show OpenGateway config status",
-      handler: async () => {
-        return `No config found. Create one at:\n  ~/.pi/agent/opengateway.json  (global)\n  .pi/opengateway.json          (project)\n\nSee config.example.json for the required shape.`;
+      handler: async (_args, ctx) => {
+        const msg = `No config found. Create one at:\n  ~/.pi/agent/opengateway.json  (global)\n  .pi/opengateway.json          (project)\n\nSee config.example.json for the required shape.`;
+        if (ctx.hasUI) ctx.ui.notify(msg, "warning");
       },
     });
     return;
