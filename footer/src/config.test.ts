@@ -1,146 +1,121 @@
-import { describe, expect, it } from "vitest";
-import { defaultFooterLayouts, resolveConfigWithWarnings } from "./config.js";
+import { describe, expect, it, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { loadConfig, loadFooterConfig } from "./config.js";
 
-describe("footer config layout resolution", () => {
-	it("uses default layouts when layouts are omitted", () => {
-		const result = resolveConfigWithWarnings({});
-		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toEqual([]);
+describe("loadConfig", () => {
+	let tempDir: string;
+
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "footer-config-test-"));
 	});
 
-	it("sorts custom layouts by minWidth descending", () => {
-		const result = resolveConfigWithWarnings({
-			layouts: [
-				{ minWidth: 0, left: ["model"], right: [] },
-				{ minWidth: 100, left: ["git"], right: [] },
-				{ minWidth: 60, left: ["directory"], right: ["context"] },
-			],
-		});
-
-		expect(result.config.layouts.map((layout) => layout.minWidth)).toEqual([
-			100,
-			60,
-			0,
-		]);
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
 	});
 
-	it("omits unknown and duplicate segments with warnings", () => {
-		const result = resolveConfigWithWarnings({
-			layouts: [
-				{
-					minWidth: 0,
-					left: ["model", "git", "git", "missing" as never],
-					right: ["context", "model"],
-				},
-			],
-		});
+	it("loads a valid config file", () => {
+		const configPath = join(tempDir, "config.json");
+		writeFileSync(configPath, JSON.stringify({ showGit: false, separator: " / " }));
 
-		expect(result.config.layouts[0]).toEqual({
-			minWidth: 0,
-			left: ["model", "git"],
-			right: ["context"],
-		});
-		expect(result.warnings).toContain(
-			"layouts[0].left contains duplicate segment 'git'; omitting",
-		);
-		expect(result.warnings).toContain(
-			"layouts[0].left contains unknown segment 'missing'; omitting",
-		);
-		expect(result.warnings).toContain(
-			"layouts[0].right contains duplicate segment 'model'; omitting",
-		);
+		const result = loadConfig([configPath]);
+		expect(result.config.showGit).toBe(false);
+		expect(result.config.separator).toBe(" / ");
+		expect(result.loadedPaths).toEqual([configPath]);
+		expect(result.error).toBeUndefined();
 	});
 
-	it("falls back to defaults when no valid layouts remain", () => {
-		const result = resolveConfigWithWarnings({
-			layouts: [{ minWidth: -1, left: ["model"], right: [] }],
-		});
-
-		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toContain(
-			"layouts[0].minWidth must be a non-negative number; skipping",
-		);
-		expect(result.warnings).toContain(
-			"no valid layouts configured; using default layouts",
-		);
+	it("skips missing files", () => {
+		const result = loadConfig([join(tempDir, "nonexistent.json")]);
+		expect(result.loadedPaths).toEqual([]);
+		expect(result.error).toBeUndefined();
 	});
 
-	it("falls back to defaults when a layout has no visible segments", () => {
-		const result = resolveConfigWithWarnings({
-			layouts: [{ minWidth: 0, left: [], right: [] }],
-		});
+	it("reports error for malformed JSON", () => {
+		const configPath = join(tempDir, "bad.json");
+		writeFileSync(configPath, "{invalid json");
 
-		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toContain(
-			"layouts[0] has no visible segments; skipping",
-		);
-		expect(result.warnings).toContain(
-			"no valid layouts configured; using default layouts",
-		);
+		const result = loadConfig([configPath]);
+		expect(result.loadedPaths).toEqual([]);
+		expect(result.error).toContain(configPath);
 	});
 
-	it("falls back to defaults when layouts is not an array", () => {
-		const result = resolveConfigWithWarnings({ layouts: "bad" as never });
+	it("merges multiple config files in order", () => {
+		const global = join(tempDir, "global.json");
+		const project = join(tempDir, "project.json");
+		writeFileSync(global, JSON.stringify({ showGit: false, separator: " / " }));
+		writeFileSync(project, JSON.stringify({ showGit: true }));
 
-		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toEqual([
-			"layouts must be an array; using default layouts",
-		]);
+		const result = loadConfig([global, project]);
+		expect(result.config.showGit).toBe(true);
+		expect(result.config.separator).toBe(" / ");
+		expect(result.loadedPaths).toEqual([global, project]);
+	});
+
+	it("merges modelAliases from multiple files", () => {
+		const global = join(tempDir, "global.json");
+		const project = join(tempDir, "project.json");
+		writeFileSync(global, JSON.stringify({ modelAliases: { "sonnet": "s4" } }));
+		writeFileSync(project, JSON.stringify({ modelAliases: { "opus": "o3" } }));
+
+		const result = loadConfig([global, project]);
+		expect(result.config.modelAliases).toEqual({ sonnet: "s4", opus: "o3" });
+	});
+
+	it("merges colors from multiple files", () => {
+		const global = join(tempDir, "global.json");
+		const project = join(tempDir, "project.json");
+		writeFileSync(global, JSON.stringify({ colors: { model: "red" } }));
+		writeFileSync(project, JSON.stringify({ colors: { git: "green" } }));
+
+		const result = loadConfig([global, project]);
+		expect(result.config.colors.model).toBe("red");
+		expect(result.config.colors.git).toBe("green");
+	});
+
+	it("returns defaults when no files exist", () => {
+		const result = loadConfig([]);
+		expect(result.config.preset).toBe("default");
+		expect(result.config.showGit).toBe(true);
+		expect(result.loadedPaths).toEqual([]);
 	});
 });
 
-describe("footer config presets", () => {
-	it("applies supported preset values", () => {
-		const result = resolveConfigWithWarnings({ preset: "minimal" });
+describe("loadFooterConfig", () => {
+	let tempDir: string;
 
-		expect(result.config.preset).toBe("minimal");
-		expect(result.config.separator).toBe(" · ");
-		expect(result.config.showDirectory).toBe(false);
-		expect(result.config.showGit).toBe(false);
-		expect(result.config.showTokens).toBe(false);
-		expect(result.config.layouts).toEqual([
-			{ minWidth: 0, left: ["model"], right: ["context"] },
-		]);
-		expect(result.warnings).toEqual([]);
+	beforeEach(() => {
+		tempDir = mkdtempSync(join(tmpdir(), "footer-config-test-"));
 	});
 
-	it("lets explicit user config override preset values", () => {
-		const result = resolveConfigWithWarnings({
-			preset: "minimal",
-			showGit: true,
-			separator: " / ",
-			layouts: [{ minWidth: 0, left: ["model", "git"], right: [] }],
-		});
+	afterEach(() => {
+		rmSync(tempDir, { recursive: true, force: true });
+	});
 
-		expect(result.config.preset).toBe("minimal");
+	it("loads global and project configs in order", () => {
+		const globalPath = join(tempDir, "global.json");
+		const projectPath = join(tempDir, "project.json");
+		writeFileSync(globalPath, JSON.stringify({ showGit: false }));
+		writeFileSync(projectPath, JSON.stringify({ showGit: true }));
+
+		const result = loadFooterConfig(globalPath, projectPath);
 		expect(result.config.showGit).toBe(true);
-		expect(result.config.separator).toBe(" / ");
-		expect(result.config.layouts).toEqual([
-			{ minWidth: 0, left: ["model", "git"], right: [] },
-		]);
+		expect(result.loadedPaths).toEqual([globalPath, projectPath]);
 	});
 
-	it("warns for unknown preset and falls back to default behavior", () => {
-		const result = resolveConfigWithWarnings({
-			preset: "cyberpunk",
-			showGit: false,
-		});
+	it("works when only global exists", () => {
+		const globalPath = join(tempDir, "global.json");
+		writeFileSync(globalPath, JSON.stringify({ separator: " > " }));
 
-		expect(result.config.preset).toBe("default");
-		expect(result.config.showGit).toBe(false);
-		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toContain(
-			"unknown preset 'cyberpunk'; using default preset",
-		);
+		const result = loadFooterConfig(globalPath, join(tempDir, "missing.json"));
+		expect(result.config.separator).toBe(" > ");
+		expect(result.loadedPaths).toEqual([globalPath]);
 	});
 
-	it("preserves defaults when preset is omitted", () => {
-		const result = resolveConfigWithWarnings({});
-
+	it("works when neither exists", () => {
+		const result = loadFooterConfig(join(tempDir, "a.json"), join(tempDir, "b.json"));
+		expect(result.loadedPaths).toEqual([]);
 		expect(result.config.preset).toBe("default");
-		expect(result.config.separator).toBe(" | ");
-		expect(result.config.showGit).toBe(true);
-		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toEqual([]);
 	});
 });

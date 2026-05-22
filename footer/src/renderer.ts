@@ -1,7 +1,9 @@
 import { layout } from "./layout.js";
-import type { ColorFn, FooterInput, Theme, Totals } from "./types.js";
+import type { ColorFn, FooterInput, Theme } from "./types.js";
 import type { FooterLayoutConfig, FooterSegmentId } from "./config.js";
 import { formatModelName } from "./modelName.js";
+import { formatFullTokens, formatNoCacheTokens, formatTotalOnlyTokens } from "./tokenFormat.js";
+import { formatCount } from "./utils.js";
 
 // ── Public interface ──────────────────────────────────────────
 
@@ -35,48 +37,20 @@ function buildSegments(
 		git: cfg.showGit ? gitSegment(input, cf) : undefined,
 		context: cfg.showContext ? contextSegment(input, cf) : undefined,
 		tokensFull: cfg.showTokens
-			? formatTokenSegment(
-				input.totals,
-				"full",
-				showCacheRead,
-				showCacheWrites,
-				cf,
-				cfg.colors.tokens,
-			)
+			? formatFullTokens(input.totals, { showCacheRead, showCacheWrites, cf, color: cfg.colors.tokens })
 			: undefined,
 		tokensNoCache: cfg.showTokens
-			? formatTokenSegment(
-				input.totals,
-				"no-cache",
-				showCacheRead,
-				showCacheWrites,
-				cf,
-				cfg.colors.tokens,
-			)
+			? formatNoCacheTokens(input.totals, cf, cfg.colors.tokens)
 			: undefined,
 		tokensTotal: cfg.showTokens
-			? formatTokenSegment(
-				input.totals,
-				"total-only",
-				showCacheRead,
-				showCacheWrites,
-				cf,
-				cfg.colors.tokens,
-			)
+			? formatTotalOnlyTokens(input.totals, cf, cfg.colors.tokens)
 			: undefined,
 	};
 }
 
 // ── Private: low-level helpers ────────────────────────────────
 
-function formatCount(value: number): string {
-	if (!Number.isFinite(value) || value <= 0) return "0";
-	if (value < 1_000) return `${Math.round(value)}`;
-	if (value < 1_000_000)
-		return `${(value / 1_000).toFixed(value < 10_000 ? 1 : 0)}k`;
-	return `${(value / 1_000_000).toFixed(1)}m`;
-}
-
+// formatCount is now in utils.ts
 
 // ── Private: segment formatters ───────────────────────────────
 
@@ -114,37 +88,6 @@ function gitSegment(
 		input.config.colors.gitDirty,
 		`●${input.gitDirtyCount}`,
 	)}`;
-}
-
-function formatTokenSegment(
-	totals: Totals,
-	mode: "full" | "no-cache" | "total-only",
-	showCacheRead: boolean,
-	showCacheWrites: boolean,
-	cf: ColorFn,
-	tokenColor: string,
-): string {
-	const total = totals.input + totals.output;
-
-	let text: string;
-	if (mode === "total-only") {
-		text = `Σ${formatCount(total)}`;
-	} else {
-		const base = `↑${formatCount(totals.input)} ↓${formatCount(
-			totals.output,
-		)} Σ${formatCount(total)}`;
-		if (mode === "full") {
-			const cacheParts = [
-				showCacheRead ? `↯${formatCount(totals.cacheRead)}` : undefined,
-				showCacheWrites ? `↥${formatCount(totals.cacheWrite)}` : undefined,
-			].filter(Boolean);
-			text = cacheParts.length ? `${base} ${cacheParts.join(" ")}` : base;
-		} else {
-			text = base;
-		}
-	}
-
-	return cf(tokenColor, text);
 }
 
 function contextSegment(
