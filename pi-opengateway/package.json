@@ -1,0 +1,13 @@
+{
+  "name": "pi-opengateway",
+  "version": "1.0.0",
+  "description": "pi extension — OpenGateway provider (OpenAI-compatible)",
+  "type": "module",
+  "pi": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {},
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}
