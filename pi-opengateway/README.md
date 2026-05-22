@@ -5,7 +5,7 @@ pi extension that registers an [OpenGateway](https://opengateway.gitlawb.com) pr
 ## Install
 
 ```bash
-pi install @neilurk12/pi-opengateway
+pi install npm:@neilurk12/pi-opengateway
 ```
 
 For project-local install:
