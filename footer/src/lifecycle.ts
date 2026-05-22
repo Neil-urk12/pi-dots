@@ -2,7 +2,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 
 import { defaultConfig, loadFooterConfig, type ResolvedConfig } from "./config.js";
-import type { FooterInput } from "./types.js";
+import type { FooterInput, Totals } from "./types.js";
 import { createGitState, type GitStateHandle } from "./git.js";
 import { accumulateTotals } from "./tokens.js";
 import { normalizeThinkingLevel } from "./utils.js";
@@ -25,6 +25,8 @@ export class FooterLifecycle {
 	#getProjectConfigPath: (cwd: string) => string;
 	#getThinkingLevel: () => string | undefined;
 	#onRenderNeeded: () => void;
+	#cachedTotals: Totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+	#cachedBranchLength: number = 0;
 
 	constructor(opts: LifecycleOptions) {
 		this.#globalConfigPath = opts.globalConfigPath;
@@ -42,6 +44,8 @@ export class FooterLifecycle {
 	// ── Lifecycle ──────────────────────────────────────────────────
 
 	async start(ctx: ExtensionContext): Promise<void> {
+		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		this.#cachedBranchLength = 0;
 		this.#cwd = ctx.cwd;
 		this.#loadedConfig = loadFooterConfig(
 			this.#globalConfigPath,
@@ -62,6 +66,8 @@ export class FooterLifecycle {
 	shutdown(): void {
 		this.#git?.clear();
 		this.#git = undefined;
+		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		this.#cachedBranchLength = 0;
 	}
 
 	#createGit(cwd: string): void {
@@ -106,6 +112,8 @@ export class FooterLifecycle {
 	}
 
 	async reload(ctx: ExtensionContext): Promise<void> {
+		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		this.#cachedBranchLength = 0;
 		this.#loadedConfig = loadFooterConfig(
 			this.#globalConfigPath,
 			this.#getProjectConfigPath(ctx.cwd),
@@ -125,6 +133,8 @@ export class FooterLifecycle {
 	}
 
 	async toggle(): Promise<boolean> {
+		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		this.#cachedBranchLength = 0;
 		this.#footerEnabled = !this.#footerEnabled;
 		if (!this.#footerEnabled) {
 			this.#git?.clear();
@@ -141,6 +151,11 @@ export class FooterLifecycle {
 	// ── Query ──────────────────────────────────────────────────────
 
 	getFooterInput(ctx: ExtensionContext): FooterInput {
+		const branch = ctx.sessionManager.getBranch();
+		if (branch.length !== this.#cachedBranchLength) {
+			this.#cachedTotals = accumulateTotals(branch);
+			this.#cachedBranchLength = branch.length;
+		}
 		return {
 			modelId: ctx.model?.id ?? "no-model",
 			thinkingLevel: this.#thinkingLevel,
@@ -149,7 +164,7 @@ export class FooterLifecycle {
 			gitDirtyCount: this.#git?.state.dirtyCount ?? 0,
 			contextUsed: ctx.getContextUsage?.()?.tokens ?? 0,
 			contextMax: ctx.model?.contextWindow,
-			totals: accumulateTotals(ctx.sessionManager.getBranch()),
+			totals: this.#cachedTotals,
 			config: this.#config,
 		};
 	}
