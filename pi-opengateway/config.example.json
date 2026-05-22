@@ -1,15 +1,15 @@
 {
-  "baseUrl": "https://your-gateway.example.com/v1",
+  "baseUrl": "https://opengateway.gitlawb.com/v1",
   "apiKey": "your-api-key-here",
   "models": [
     {
-      "id": "model-id",
-      "name": "Model Display Name",
-      "reasoning": false,
+      "id": "mimo-v2.5-pro",
+      "name": "MiMo 2.5 Pro (Gateway)",
+      "reasoning": true,
       "input": ["text"],
       "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
-      "contextWindow": 128000,
-      "maxTokens": 4096
+      "contextWindow": 1048576,
+      "maxTokens": 16384
     }
   ]
 }
