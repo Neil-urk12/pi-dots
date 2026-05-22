@@ -1,13 +1,52 @@
 {
-  "name": "pi-opengateway",
+  "name": "@neilurk12/pi-opengateway",
   "version": "1.0.0",
   "description": "pi extension — OpenGateway provider (OpenAI-compatible)",
   "type": "module",
-  "pi": {
-    "extensions": ["./index.ts"]
+  "keywords": [
+    "pi",
+    "pi-package",
+    "pi-extension",
+    "opengateway",
+    "openai",
+    "provider",
+    "gateway"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Neil-urk12/pi-dots.git"
   },
-  "scripts": {},
-  "keywords": [],
-  "author": "",
-  "license": "ISC"
+  "license": "MIT",
+  "files": [
+    "dist",
+    "config.example.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
 }
