@@ -101,7 +101,7 @@ export default function (pi: ExtensionAPI) {
 	pi.on("message_end", (event) => {
 		const agentMsg = event.message;
 		let outputTokens: number | undefined;
-	if (agentMsg.role === "assistant") {
+		if (agentMsg.role === "assistant") {
 			const msg = agentMsg as unknown as { usage?: MessageUsage; message?: { usage?: MessageUsage } };
 			const usage = msg.usage ?? msg.message?.usage;
 			outputTokens = usage?.output;
