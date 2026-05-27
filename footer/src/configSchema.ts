@@ -8,6 +8,7 @@ export const footerSegmentIds = [
 	"tokensFull",
 	"tokensNoCache",
 	"tokensTotal",
+	"toks",
 ] as const;
 
 export type FooterSegmentId = (typeof footerSegmentIds)[number];
@@ -40,6 +41,7 @@ export type CleanFooterConfig = {
 	showContext?: boolean;
 	showDirectory?: boolean;
 	showEffort?: boolean;
+	showToks?: boolean;
 	separator?: string;
 	layouts?: FooterLayoutConfig[];
 	gitRefreshDebounceMs?: number;
@@ -80,7 +82,7 @@ export const defaultFooterLayouts: FooterLayoutConfig[] = [
 	{
 		minWidth: 100,
 		left: ["model", "directory", "git"],
-		right: ["context", "tokensFull"],
+		right: ["context", "tokensFull", "toks"],
 	},
 	{
 		minWidth: 80,
@@ -121,7 +123,7 @@ const denseLayouts: FooterLayoutConfig[] = [
 	{
 		minWidth: 100,
 		left: ["model", "directory", "git"],
-		right: ["context", "tokensFull"],
+		right: ["context", "tokensFull", "toks"],
 	},
 	{
 		minWidth: 60,
@@ -188,6 +190,7 @@ export const defaultConfig: ResolvedConfig = {
 	showContext: true,
 	showDirectory: true,
 	showEffort: true,
+	showToks: true,
 	separator: " | ",
 	layouts: defaultFooterLayouts,
 	gitRefreshDebounceMs: DEFAULT_GIT_REFRESH_DEBOUNCE_MS,

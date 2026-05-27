@@ -172,6 +172,47 @@ describe("renderFooter", () => {
 		expect(line).not.toContain("↥");
 	});
 
+	// ── Toks segment ────────────────────────────────────────
+
+	it("shows toks when lastTokPerSec is set", () => {
+		const input = makeInput({ lastTokPerSec: 82 });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain("82 tok/s");
+	});
+
+	it("hides toks when lastTokPerSec is undefined", () => {
+		const input = makeInput({ lastTokPerSec: undefined });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).not.toContain("tok/s");
+	});
+
+	it("hides toks when lastTokPerSec is 0", () => {
+		const input = makeInput({ lastTokPerSec: 0 });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).not.toContain("tok/s");
+	});
+
+	it("hides toks when showToks is false", () => {
+		const input = makeInput({
+			lastTokPerSec: 82,
+			configOverrides: { showToks: false },
+		});
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).not.toContain("tok/s");
+	});
+
+	it("shows toks at default config", () => {
+		const input = makeInput({ lastTokPerSec: 150 });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain("150 tok/s");
+	});
+
+	it("rounds tok/s to integer in display", () => {
+		const input = makeInput({ lastTokPerSec: 82.7 });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain("83 tok/s");
+	});
+
 	it("hides cache read when showCacheRead is false", () => {
 		const input = makeInput({
 		configOverrides: { showCacheRead: false, showCacheWrites: true },
