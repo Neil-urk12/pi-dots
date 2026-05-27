@@ -86,12 +86,12 @@ export const defaultFooterLayouts: FooterLayoutConfig[] = [
 	},
 	{
 		minWidth: 80,
-		left: ["model", "directory", "git"],
+		left: ["model", "directory", "git", "toks"],
 		right: ["context", "tokensNoCache"],
 	},
 	{
 		minWidth: 60,
-		left: ["model", "directory", "git"],
+		left: ["model", "directory", "git", "toks"],
 		right: ["context", "tokensTotal"],
 	},
 	{
