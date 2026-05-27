@@ -56,8 +56,8 @@ describe("loadConfig", () => {
 	it("merges modelAliases from multiple files", () => {
 		const global = join(tempDir, "global.json");
 		const project = join(tempDir, "project.json");
-		writeFileSync(global, JSON.stringify({ modelAliases: { "sonnet": "s4" } }));
-		writeFileSync(project, JSON.stringify({ modelAliases: { "opus": "o3" } }));
+		writeFileSync(global, JSON.stringify({ modelAliases: { sonnet: "s4" } }));
+		writeFileSync(project, JSON.stringify({ modelAliases: { opus: "o3" } }));
 
 		const result = loadConfig([global, project]);
 		expect(result.config.modelAliases).toEqual({ sonnet: "s4", opus: "o3" });

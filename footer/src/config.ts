@@ -5,10 +5,7 @@ import { resolveConfigWithWarnings, mergeConfig } from "./configSchema.js";
 // Re-export everything from configSchema for backward compatibility
 export * from "./configSchema.js";
 
-export function loadFooterConfig(
-	globalPath: string,
-	projectPath: string,
-): ConfigLoadResult {
+export function loadFooterConfig(globalPath: string, projectPath: string): ConfigLoadResult {
 	return loadConfig([globalPath, projectPath]);
 }
 
@@ -20,9 +17,7 @@ export function loadConfig(paths: string[]): ConfigLoadResult {
 	for (const configPath of paths) {
 		if (!existsSync(configPath)) continue;
 		try {
-			const parsed = JSON.parse(
-				readFileSync(configPath, "utf8"),
-			) as CleanFooterConfig;
+			const parsed = JSON.parse(readFileSync(configPath, "utf8")) as CleanFooterConfig;
 			merged = mergeConfig(merged, parsed);
 			loaded.push(configPath);
 		} catch (err) {

@@ -106,9 +106,7 @@ export const defaultFooterLayouts: FooterLayoutConfig[] = [
 	},
 ];
 
-const minimalLayouts: FooterLayoutConfig[] = [
-	{ minWidth: 0, left: ["model"], right: ["context"] },
-];
+const minimalLayouts: FooterLayoutConfig[] = [{ minWidth: 0, left: ["model"], right: ["context"] }];
 
 const compactLayouts: FooterLayoutConfig[] = [
 	{
@@ -133,9 +131,7 @@ const denseLayouts: FooterLayoutConfig[] = [
 	{ minWidth: 0, left: ["model"], right: ["context"] },
 ];
 
-const focusLayouts: FooterLayoutConfig[] = [
-	{ minWidth: 0, left: ["model"], right: ["context"] },
-];
+const focusLayouts: FooterLayoutConfig[] = [{ minWidth: 0, left: ["model"], right: ["context"] }];
 
 export const footerPresetConfigs: Record<FooterPresetId, CleanFooterConfig> = {
 	default: {},
@@ -184,7 +180,7 @@ export const defaultConfig: ResolvedConfig = {
 	enabled: true,
 	showGit: true,
 	showTokens: true,
-	showCache: true, /* deprecated: showCacheRead */
+	showCache: true /* deprecated: showCacheRead */,
 	showCacheRead: true,
 	showCacheWrites: false,
 	showContext: true,
@@ -247,9 +243,10 @@ export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoad
 			// preset field always comes from resolvePresetId above
 			...effectiveConfig,
 			preset,
-			separator: typeof effectiveConfig.separator === "string"
-				? effectiveConfig.separator
-				: defaultConfig.separator,
+			separator:
+				typeof effectiveConfig.separator === "string"
+					? effectiveConfig.separator
+					: defaultConfig.separator,
 			layouts: resolvedLayouts.layouts,
 			gitRefreshDebounceMs: positiveNumber(
 				effectiveConfig.gitRefreshDebounceMs,
@@ -281,10 +278,7 @@ export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoad
 
 // ── Private helpers ──────────────────────────────────────────
 
-function resolvePresetId(
-	preset: CleanFooterConfig["preset"],
-	warnings: string[],
-): FooterPresetId {
+function resolvePresetId(preset: CleanFooterConfig["preset"], warnings: string[]): FooterPresetId {
 	if (preset === undefined || preset === "default") return "default";
 	if (typeof preset !== "string") {
 		warnings.push("preset must be a string; using default preset");
@@ -376,8 +370,7 @@ function resolveSegmentList(
 }
 
 function isFooterSegmentId(value: unknown): value is FooterSegmentId {
-	return typeof value === "string" &&
-		(footerSegmentIds as readonly string[]).includes(value);
+	return typeof value === "string" && (footerSegmentIds as readonly string[]).includes(value);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -385,22 +378,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function positiveLayoutWidth(value: unknown): number | undefined {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0
-		? value
-		: undefined;
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
 }
 
 function positiveNumber(value: unknown, fallback: number): number {
-	return typeof value === "number" && Number.isFinite(value) && value > 0
-		? value
-		: fallback;
+	return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function percentNumber(value: unknown, fallback: number): number {
-	return typeof value === "number" &&
-		Number.isFinite(value) &&
-		value >= 0 &&
-		value <= 100
+	return typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= 100
 		? value
 		: fallback;
 }
