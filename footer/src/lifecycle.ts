@@ -105,7 +105,7 @@ export class FooterLifecycle {
 			if (this.#messageStartTime !== undefined && outputTokens && outputTokens > 0) {
 				const elapsed = Date.now() - this.#messageStartTime;
 				if (elapsed > 0) {
-					this.#lastTokPerSec = Math.round(outputTokens / (elapsed / 1000));
+					this.#lastTokPerSec = outputTokens / (elapsed / 1000);
 				}
 			}
 			this.#messageStartTime = undefined;

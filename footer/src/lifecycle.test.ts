@@ -220,7 +220,7 @@ describe("FooterLifecycle", () => {
 			expect(input.lastTokPerSec).toBe(100);
 		});
 
-		it("rounds tok/s to integer", () => {
+		it("computes exact tok/s value", () => {
 			const { lifecycle } = createLifecycle();
 			vi.setSystemTime(1000);
 			lifecycle.onMessageStart("assistant");
@@ -231,10 +231,32 @@ describe("FooterLifecycle", () => {
 			expect(input.lastTokPerSec).toBe(400); // 500 / 1.25 = 400
 		});
 
+		it("returns raw tok/s without rounding", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(1700); // 0.7 seconds elapsed
+			lifecycle.onMessageEnd("assistant", 100); // 100 / 0.7 ≈ 142.857
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.lastTokPerSec).toBeCloseTo(142.857, 2);
+		});
+
 		it("sets undefined when no output tokens", () => {
 			const { lifecycle } = createLifecycle();
 			lifecycle.onMessageStart("assistant");
 			lifecycle.onMessageEnd("assistant", 0);
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.lastTokPerSec).toBeUndefined();
+		});
+
+		it("sets undefined when elapsed time is zero", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(1000); // same time — 0 elapsed
+			lifecycle.onMessageEnd("assistant", 100);
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
 			expect(input.lastTokPerSec).toBeUndefined();
