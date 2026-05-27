@@ -17,8 +17,7 @@ export function accumulateTotals(
 	};
 
 	for (const entry of branch) {
-		if (entry.type !== "message" || entry.message?.role !== "assistant")
-			continue;
+		if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
 		const msg = entry.message as AssistantMessage;
 		totals.input += msg.usage?.input ?? 0;
 		totals.output += msg.usage?.output ?? 0;

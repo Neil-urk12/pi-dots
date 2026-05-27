@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { renderFooter } from "./renderer.js";
 import type { FooterInput, Theme, Totals } from "./types.js";
-import { defaultConfig as baseDefaultConfig, resolveConfigWithWarnings, type ResolvedConfig } from "./config.js";
+import {
+	defaultConfig as baseDefaultConfig,
+	resolveConfigWithWarnings,
+	type ResolvedConfig,
+} from "./config.js";
 
 // ── Test helpers ───────────────────────────────────────────────
 
@@ -39,9 +43,7 @@ function makeInput(
 		contextUsed: 50_000,
 		contextMax: 200_000,
 		totals: { input: 1500, output: 500, cacheRead: 200, cacheWrite: 100 },
-		config: configOverrides
-			? { ...defaultConfig, ...configOverrides }
-			: defaultConfig,
+		config: configOverrides ? { ...defaultConfig, ...configOverrides } : defaultConfig,
 		...rest,
 	};
 }
@@ -215,7 +217,7 @@ describe("renderFooter", () => {
 
 	it("hides cache read when showCacheRead is false", () => {
 		const input = makeInput({
-		configOverrides: { showCacheRead: false, showCacheWrites: true },
+			configOverrides: { showCacheRead: false, showCacheWrites: true },
 		});
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).not.toContain("↯");
@@ -331,9 +333,7 @@ describe("renderFooter", () => {
 
 	it("handles missing directory gracefully", () => {
 		const input = makeInput({ directory: undefined });
-		expect(() =>
-			renderFooter(input, plainTheme, 100),
-		).not.toThrow();
+		expect(() => renderFooter(input, plainTheme, 100)).not.toThrow();
 	});
 
 	it("handles zero totals", () => {

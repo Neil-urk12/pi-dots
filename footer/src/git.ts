@@ -52,9 +52,7 @@ export function createGitState(options: {
 			]);
 
 			const branch = branchResult.stdout.trim() || "detached";
-			const dirtyCount = statusResult.stdout
-				.split("\n")
-				.filter(Boolean).length;
+			const dirtyCount = statusResult.stdout.split("\n").filter(Boolean).length;
 			gitState = { inRepo: true, branch, dirtyCount };
 		} catch {
 			gitState = { inRepo: false, dirtyCount: 0 };

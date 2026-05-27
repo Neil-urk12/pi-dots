@@ -9,12 +9,7 @@ import { truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
  * If both sides don't fit side by side, each is truncated to roughly
  * half the available width with a single space in between.
  */
-export function layout(
-	left: string[],
-	right: string[],
-	separator: string,
-	width: number,
-): string {
+export function layout(left: string[], right: string[], separator: string, width: number): string {
 	const leftStr = left.filter(Boolean).join(separator);
 	const rightStr = right.filter(Boolean).join(separator);
 	return joinLeftRight(leftStr, rightStr, width);
@@ -27,22 +22,13 @@ export function layout(
  * - Don't fit together → each side truncated to half the width.
  * - One side empty → only the other side shown (truncated to width).
  */
-export function joinLeftRight(
-	left: string,
-	right: string,
-	width: number,
-): string {
+export function joinLeftRight(left: string, right: string, width: number): string {
 	if (!right) return truncateToWidth(left, width);
 	if (!left) return truncateToWidth(right, width);
 
 	const gap = width - visibleWidth(left) - visibleWidth(right);
-	if (gap >= 1)
-		return truncateToWidth(left + " ".repeat(gap) + right, width);
+	if (gap >= 1) return truncateToWidth(left + " ".repeat(gap) + right, width);
 
 	const half = Math.max(1, Math.floor((width - 1) / 2));
-	return (
-		truncateToWidth(left, half) +
-		" " +
-		truncateToWidth(right, width - half - 1)
-	);
+	return truncateToWidth(left, half) + " " + truncateToWidth(right, width - half - 1);
 }
