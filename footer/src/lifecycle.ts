@@ -27,6 +27,8 @@ export class FooterLifecycle {
 	#onRenderNeeded: () => void;
 	#cachedTotals: Totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	#cachedBranchLength: number = 0;
+	#messageStartTime: number | undefined = undefined;
+	#lastTokPerSec: number | undefined = undefined;
 
 	constructor(opts: LifecycleOptions) {
 		this.#globalConfigPath = opts.globalConfigPath;
@@ -68,6 +70,8 @@ export class FooterLifecycle {
 		this.#git = undefined;
 		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 		this.#cachedBranchLength = 0;
+		this.#messageStartTime = undefined;
+		this.#lastTokPerSec = undefined;
 	}
 
 	#createGit(cwd: string): void {
@@ -90,8 +94,23 @@ export class FooterLifecycle {
 		this.#onRenderNeeded();
 	}
 
-	onMessageEnd(role: string): void {
-		if (role === "assistant") this.#onRenderNeeded();
+	onMessageStart(role: string): void {
+		if (role === "assistant") {
+			this.#messageStartTime = Date.now();
+		}
+	}
+
+	onMessageEnd(role: string, outputTokens?: number): void {
+		if (role === "assistant") {
+			if (this.#messageStartTime !== undefined && outputTokens && outputTokens > 0) {
+				const elapsed = Date.now() - this.#messageStartTime;
+				if (elapsed > 0) {
+					this.#lastTokPerSec = Math.round(outputTokens / (elapsed / 1000));
+				}
+			}
+			this.#messageStartTime = undefined;
+			this.#onRenderNeeded();
+		}
 	}
 
 	onToolEnd(toolName: string): void {
@@ -114,6 +133,8 @@ export class FooterLifecycle {
 	async reload(ctx: ExtensionContext): Promise<void> {
 		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 		this.#cachedBranchLength = 0;
+		this.#messageStartTime = undefined;
+		this.#lastTokPerSec = undefined;
 		this.#loadedConfig = loadFooterConfig(
 			this.#globalConfigPath,
 			this.#getProjectConfigPath(ctx.cwd),
@@ -135,6 +156,8 @@ export class FooterLifecycle {
 	async toggle(): Promise<boolean> {
 		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 		this.#cachedBranchLength = 0;
+		this.#messageStartTime = undefined;
+		this.#lastTokPerSec = undefined;
 		this.#footerEnabled = !this.#footerEnabled;
 		if (!this.#footerEnabled) {
 			this.#git?.clear();
@@ -165,6 +188,7 @@ export class FooterLifecycle {
 			contextUsed: ctx.getContextUsage?.()?.tokens ?? 0,
 			contextMax: ctx.model?.contextWindow,
 			totals: this.#cachedTotals,
+			lastTokPerSec: this.#lastTokPerSec,
 			config: this.#config,
 		};
 	}

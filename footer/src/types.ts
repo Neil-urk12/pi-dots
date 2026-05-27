@@ -28,6 +28,7 @@ export type FooterInput = {
 	contextUsed: number;
 	contextMax?: number;
 	totals: Totals;
+	lastTokPerSec?: number;
 	config: ResolvedConfig;
 };
 
