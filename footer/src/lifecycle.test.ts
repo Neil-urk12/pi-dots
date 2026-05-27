@@ -47,7 +47,9 @@ import { accumulateTotals } from "./tokens.js";
 
 // ── Helpers ────────────────────────────────────────────────────
 
-function makeMockCtx(overrides?: Partial<ExtensionContext> & { branchLength?: number }): ExtensionContext {
+function makeMockCtx(
+	overrides?: Partial<ExtensionContext> & { branchLength?: number },
+): ExtensionContext {
 	const { branchLength, ...rest } = overrides ?? {};
 	return {
 		cwd: "/home/user/projects/my-project",
@@ -58,7 +60,8 @@ function makeMockCtx(overrides?: Partial<ExtensionContext> & { branchLength?: nu
 		} as ExtensionContext["model"],
 		getContextUsage: () => ({ tokens: 84_000 }),
 		sessionManager: {
-			getBranch: () => Array(branchLength ?? 0).fill({ type: "message", message: { role: "assistant" } }),
+			getBranch: () =>
+				Array(branchLength ?? 0).fill({ type: "message", message: { role: "assistant" } }),
 		} as unknown as ExtensionContext["sessionManager"],
 		ui: {} as ExtensionContext["ui"],
 		...rest,
@@ -119,9 +122,7 @@ describe("FooterLifecycle", () => {
 
 		it("does not crash in non-interactive context", async () => {
 			const { lifecycle } = createLifecycle();
-			await expect(
-				lifecycle.start(makeMockCtx({ hasUI: false })),
-			).resolves.toBeUndefined();
+			await expect(lifecycle.start(makeMockCtx({ hasUI: false }))).resolves.toBeUndefined();
 		});
 	});
 
@@ -129,8 +130,7 @@ describe("FooterLifecycle", () => {
 		it("clears git handle when it exists", async () => {
 			const { lifecycle } = createLifecycle();
 			await lifecycle.start(makeMockCtx());
-			const handle = (createGitState as ReturnType<typeof vi.fn>).mock
-				.results[0]?.value;
+			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
 
 			lifecycle.shutdown();
 			expect(handle.clear).toHaveBeenCalledTimes(1);
@@ -302,8 +302,7 @@ describe("FooterLifecycle", () => {
 		it("schedules git refresh when git handle exists", async () => {
 			const { lifecycle } = createLifecycle();
 			await lifecycle.start(makeMockCtx());
-			const handle = (createGitState as ReturnType<typeof vi.fn>).mock
-				.results[0]?.value;
+			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
 
 			lifecycle.onUserBash();
 			expect(handle.schedule).toHaveBeenCalledTimes(1);
@@ -321,8 +320,7 @@ describe("FooterLifecycle", () => {
 		it("disables and clears git", async () => {
 			const { lifecycle } = createLifecycle();
 			await lifecycle.start(makeMockCtx());
-			const handle = (createGitState as ReturnType<typeof vi.fn>).mock
-				.results[0]?.value;
+			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
 
 			const enabled = await lifecycle.toggle();
 			expect(enabled).toBe(false);
@@ -344,8 +342,7 @@ describe("FooterLifecycle", () => {
 		it("refreshes git when active", async () => {
 			const { lifecycle } = createLifecycle();
 			await lifecycle.start(makeMockCtx());
-			const handle = (createGitState as ReturnType<typeof vi.fn>).mock
-				.results[0]?.value;
+			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
 
 			await lifecycle.refresh();
 			expect(handle.refresh).toHaveBeenCalled();

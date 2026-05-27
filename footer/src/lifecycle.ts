@@ -54,9 +54,7 @@ export class FooterLifecycle {
 			this.#getProjectConfigPath(ctx.cwd),
 		);
 		this.#config = this.#loadedConfig.config;
-		this.#thinkingLevel = normalizeThinkingLevel(
-			this.#getThinkingLevel(),
-		);
+		this.#thinkingLevel = normalizeThinkingLevel(this.#getThinkingLevel());
 		this.#footerEnabled = this.#config.enabled;
 
 		if (this.#footerEnabled) {

@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-	formatFullTokens,
-	formatNoCacheTokens,
-	formatTotalOnlyTokens,
-} from "./tokenFormat.js";
+import { formatFullTokens, formatNoCacheTokens, formatTotalOnlyTokens } from "./tokenFormat.js";
 import type { Totals, ColorFn } from "./types.js";
 
 const plainCf: ColorFn = (_color, text) => text;

@@ -13,15 +13,9 @@ interface MessageUsage {
 }
 
 export default function (pi: ExtensionAPI) {
-	const globalConfigPath = path.join(
-		os.homedir(),
-		".pi",
-		"agent",
-		"clean-footer.json",
-	);
+	const globalConfigPath = path.join(os.homedir(), ".pi", "agent", "clean-footer.json");
 
-	const getProjectConfigPath = (cwd: string) =>
-		path.join(cwd, ".pi", "clean-footer.json");
+	const getProjectConfigPath = (cwd: string) => path.join(cwd, ".pi", "clean-footer.json");
 
 	let requestRender: () => void = () => {};
 
@@ -138,10 +132,7 @@ export default function (pi: ExtensionAPI) {
 	function notifyConfigStatus(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
 		if (lifecycle.loadedError) {
-			ctx.ui.notify(
-				`Clean footer config error: ${lifecycle.loadedError}`,
-				"error",
-			);
+			ctx.ui.notify(`Clean footer config error: ${lifecycle.loadedError}`, "error");
 		} else if (lifecycle.loadedWarnings.length > 0) {
 			ctx.ui.notify(
 				`Clean footer config loaded with warnings: ${lifecycle.loadedWarnings.join("; ")}`,
@@ -149,17 +140,13 @@ export default function (pi: ExtensionAPI) {
 			);
 		} else {
 			ctx.ui.notify("Clean footer config loaded", "info");
-	}
+		}
 	}
 
 	function showConfig(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
-		const loaded = lifecycle.loadedPaths.length
-			? lifecycle.loadedPaths.join("\n")
-			: "none";
-		const warnings = lifecycle.loadedWarnings.length
-			? lifecycle.loadedWarnings.join("\n")
-			: "none";
+		const loaded = lifecycle.loadedPaths.length ? lifecycle.loadedPaths.join("\n") : "none";
+		const warnings = lifecycle.loadedWarnings.length ? lifecycle.loadedWarnings.join("\n") : "none";
 		const projectPath = getProjectConfigPath(ctx.cwd);
 		ctx.ui.notify(
 			[
@@ -167,9 +154,7 @@ export default function (pi: ExtensionAPI) {
 				`global: ${globalConfigPath}`,
 				`project: ${projectPath}`,
 				`loaded:\n${loaded}`,
-				lifecycle.loadedError
-					? `error: ${lifecycle.loadedError}`
-					: "error: none",
+				lifecycle.loadedError ? `error: ${lifecycle.loadedError}` : "error: none",
 				`warnings:\n${warnings}`,
 				`preset: ${lifecycle.config.preset}`,
 				`resolved: ${JSON.stringify(lifecycle.config)}`,

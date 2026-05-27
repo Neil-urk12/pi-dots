@@ -17,11 +17,7 @@ describe("footer config layout resolution", () => {
 			],
 		});
 
-		expect(result.config.layouts.map((layout) => layout.minWidth)).toEqual([
-			100,
-			60,
-			0,
-		]);
+		expect(result.config.layouts.map((layout) => layout.minWidth)).toEqual([100, 60, 0]);
 	});
 
 	it("omits unknown and duplicate segments with warnings", () => {
@@ -40,12 +36,8 @@ describe("footer config layout resolution", () => {
 			left: ["model", "git"],
 			right: ["context"],
 		});
-		expect(result.warnings).toContain(
-			"layouts[0].left contains duplicate segment 'git'; omitting",
-		);
-		expect(result.warnings).toContain(
-			"layouts[0].left contains unknown segment 'missing'; omitting",
-		);
+		expect(result.warnings).toContain("layouts[0].left contains duplicate segment 'git'; omitting");
+		expect(result.warnings).toContain("layouts[0].left contains unknown segment 'missing'; omitting");
 		expect(result.warnings).toContain(
 			"layouts[0].right contains duplicate segment 'model'; omitting",
 		);
@@ -57,12 +49,8 @@ describe("footer config layout resolution", () => {
 		});
 
 		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toContain(
-			"layouts[0].minWidth must be a non-negative number; skipping",
-		);
-		expect(result.warnings).toContain(
-			"no valid layouts configured; using default layouts",
-		);
+		expect(result.warnings).toContain("layouts[0].minWidth must be a non-negative number; skipping");
+		expect(result.warnings).toContain("no valid layouts configured; using default layouts");
 	});
 
 	it("falls back to defaults when a layout has no visible segments", () => {
@@ -71,21 +59,15 @@ describe("footer config layout resolution", () => {
 		});
 
 		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toContain(
-			"layouts[0] has no visible segments; skipping",
-		);
-		expect(result.warnings).toContain(
-			"no valid layouts configured; using default layouts",
-		);
+		expect(result.warnings).toContain("layouts[0] has no visible segments; skipping");
+		expect(result.warnings).toContain("no valid layouts configured; using default layouts");
 	});
 
 	it("falls back to defaults when layouts is not an array", () => {
 		const result = resolveConfigWithWarnings({ layouts: "bad" as never });
 
 		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toEqual([
-			"layouts must be an array; using default layouts",
-		]);
+		expect(result.warnings).toEqual(["layouts must be an array; using default layouts"]);
 	});
 });
 
@@ -98,9 +80,7 @@ describe("footer config presets", () => {
 		expect(result.config.showDirectory).toBe(false);
 		expect(result.config.showGit).toBe(false);
 		expect(result.config.showTokens).toBe(false);
-		expect(result.config.layouts).toEqual([
-			{ minWidth: 0, left: ["model"], right: ["context"] },
-		]);
+		expect(result.config.layouts).toEqual([{ minWidth: 0, left: ["model"], right: ["context"] }]);
 		expect(result.warnings).toEqual([]);
 	});
 
@@ -115,9 +95,7 @@ describe("footer config presets", () => {
 		expect(result.config.preset).toBe("minimal");
 		expect(result.config.showGit).toBe(true);
 		expect(result.config.separator).toBe(" / ");
-		expect(result.config.layouts).toEqual([
-			{ minWidth: 0, left: ["model", "git"], right: [] },
-		]);
+		expect(result.config.layouts).toEqual([{ minWidth: 0, left: ["model", "git"], right: [] }]);
 	});
 
 	it("warns for unknown preset and falls back to default behavior", () => {
@@ -129,9 +107,7 @@ describe("footer config presets", () => {
 		expect(result.config.preset).toBe("default");
 		expect(result.config.showGit).toBe(false);
 		expect(result.config.layouts).toEqual(defaultFooterLayouts);
-		expect(result.warnings).toContain(
-			"unknown preset 'cyberpunk'; using default preset",
-		);
+		expect(result.warnings).toContain("unknown preset 'cyberpunk'; using default preset");
 	});
 
 	it("preserves defaults when preset is omitted", () => {
