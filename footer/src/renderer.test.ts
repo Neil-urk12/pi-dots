@@ -194,10 +194,9 @@ describe("renderFooter", () => {
 		expect(line).toContain("0 tok/s");
 	});
 
-	it("shows toks regardless of showToks config", () => {
+	it("shows toks always regardless of config", () => {
 		const input = makeInput({
 			lastTokPerSec: 82,
-			configOverrides: { showToks: false },
 		});
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain("82 tok/s");
