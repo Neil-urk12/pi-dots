@@ -90,9 +90,17 @@ export default function (pi: ExtensionAPI) {
 	pi.on("model_select", () => {
 		lifecycle.onModelSelect();
 	});
-
+	pi.on("message_start", (event) => {
+		lifecycle.onMessageStart(event.message.role);
+	});
 	pi.on("message_end", (event) => {
-		lifecycle.onMessageEnd(event.message.role);
+		const agentMsg = event.message;
+		let outputTokens: number | undefined;
+		if (agentMsg.role === "assistant") {
+			const usage = (agentMsg as any).usage ?? (agentMsg as any).message?.usage;
+			outputTokens = usage?.output;
+		}
+		lifecycle.onMessageEnd(agentMsg.role, outputTokens);
 	});
 
 	pi.on("tool_execution_end", (event) => {

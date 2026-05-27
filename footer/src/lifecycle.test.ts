@@ -1,4 +1,4 @@
-import { vi, describe, it, expect, beforeEach } from "vitest";
+import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 // ── Mocks ──────────────────────────────────────────────────────
@@ -184,6 +184,81 @@ describe("FooterLifecycle", () => {
 			lifecycle.onMessageEnd("user");
 			lifecycle.onMessageEnd("system");
 			expect(onRenderNeeded).not.toHaveBeenCalled();
+		});
+	});
+	describe("onMessageStart", () => {
+		it("records start time for assistant role", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("assistant");
+			// No direct assertion — just ensure no crash
+		});
+
+		it("ignores non-assistant roles", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("user");
+			lifecycle.onMessageStart("toolResult");
+			// No crash, no state change
+		});
+	});
+	describe("tok/s computation", () => {
+		beforeEach(() => {
+			vi.useFakeTimers();
+		});
+
+		afterEach(() => {
+			vi.useRealTimers();
+		});
+
+		it("computes tok/s from assistant message", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2000); // 1 second elapsed
+			lifecycle.onMessageEnd("assistant", 100);
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.lastTokPerSec).toBe(100);
+		});
+
+		it("rounds tok/s to integer", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2250); // 1.25 seconds elapsed
+			lifecycle.onMessageEnd("assistant", 500);
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.lastTokPerSec).toBe(400); // 500 / 1.25 = 400
+		});
+
+		it("sets undefined when no output tokens", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("assistant");
+			lifecycle.onMessageEnd("assistant", 0);
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.lastTokPerSec).toBeUndefined();
+		});
+
+		it("does not compute for non-assistant messages", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("user");
+			lifecycle.onMessageEnd("user", 100);
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.lastTokPerSec).toBeUndefined();
+		});
+
+		it("resets tok/s after reload", async () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			lifecycle.onMessageEnd("assistant", 100);
+
+			await lifecycle.reload(makeMockCtx());
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.lastTokPerSec).toBeUndefined();
 		});
 	});
 

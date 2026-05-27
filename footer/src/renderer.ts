@@ -45,6 +45,7 @@ function buildSegments(
 		tokensTotal: cfg.showTokens
 			? formatTotalOnlyTokens(input.totals, cf, cfg.colors.tokens)
 			: undefined,
+		toks: cfg.showToks ? toksSegment(input, cf) : undefined,
 	};
 }
 
@@ -106,6 +107,14 @@ function contextSegment(
 	if (percent >= input.config.contextWarningPercent)
 		return cf(input.config.colors.contextWarning, text);
 	return cf(input.config.colors.contextNormal, text);
+}
+
+function toksSegment(
+	input: FooterInput,
+	cf: ColorFn,
+): string | undefined {
+	if (input.lastTokPerSec === undefined || input.lastTokPerSec <= 0) return undefined;
+	return cf(input.config.colors.tokens, `${Math.round(input.lastTokPerSec)} tok/s`);
 }
 
 // ── Private: width-tier branching ──────────────────────────────
