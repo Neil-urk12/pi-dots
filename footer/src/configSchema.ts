@@ -81,8 +81,8 @@ export type ConfigLoadResult = {
 export const defaultFooterLayouts: FooterLayoutConfig[] = [
 	{
 		minWidth: 100,
-		left: ["model", "directory", "git"],
-		right: ["context", "tokensFull", "toks"],
+		left: ["model", "directory", "git", "toks"],
+		right: ["context", "tokensFull"],
 	},
 	{
 		minWidth: 80,
@@ -122,8 +122,8 @@ const compactLayouts: FooterLayoutConfig[] = [
 const denseLayouts: FooterLayoutConfig[] = [
 	{
 		minWidth: 100,
-		left: ["model", "directory", "git"],
-		right: ["context", "tokensFull", "toks"],
+		left: ["model", "directory", "git", "toks"],
+		right: ["context", "tokensFull"],
 	},
 	{
 		minWidth: 60,
