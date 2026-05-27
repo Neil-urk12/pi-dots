@@ -41,7 +41,6 @@ export type CleanFooterConfig = {
 	showContext?: boolean;
 	showDirectory?: boolean;
 	showEffort?: boolean;
-	showToks?: boolean;
 	separator?: string;
 	layouts?: FooterLayoutConfig[];
 	gitRefreshDebounceMs?: number;
@@ -186,7 +185,6 @@ export const defaultConfig: ResolvedConfig = {
 	showContext: true,
 	showDirectory: true,
 	showEffort: true,
-	showToks: true,
 	separator: " | ",
 	layouts: defaultFooterLayouts,
 	gitRefreshDebounceMs: DEFAULT_GIT_REFRESH_DEBOUNCE_MS,

@@ -83,7 +83,7 @@ function contextSegment(input: FooterInput, cf: ColorFn): string {
 	return cf(input.config.colors.contextNormal, text);
 }
 
-function toksSegment(input: FooterInput, cf: ColorFn): string | undefined {
+function toksSegment(input: FooterInput, cf: ColorFn): string {
 	if (input.lastTokPerSec === undefined) return cf(input.config.colors.tokens, "0 tok/s");
 	return cf(input.config.colors.tokens, `${Math.round(input.lastTokPerSec)} tok/s`);
 }
