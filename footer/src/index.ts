@@ -7,6 +7,11 @@ import { renderFooter } from "./renderer.js";
 
 export type { ColorFn, FooterInput, Totals, Theme } from "./types.js";
 
+interface MessageUsage {
+	output?: number;
+	input?: number;
+}
+
 export default function (pi: ExtensionAPI) {
 	const globalConfigPath = path.join(
 		os.homedir(),
@@ -96,8 +101,9 @@ export default function (pi: ExtensionAPI) {
 	pi.on("message_end", (event) => {
 		const agentMsg = event.message;
 		let outputTokens: number | undefined;
-		if (agentMsg.role === "assistant") {
-			const usage = (agentMsg as any).usage ?? (agentMsg as any).message?.usage;
+	if (agentMsg.role === "assistant") {
+			const msg = agentMsg as unknown as { usage?: MessageUsage; message?: { usage?: MessageUsage } };
+			const usage = msg.usage ?? msg.message?.usage;
 			outputTokens = usage?.output;
 		}
 		lifecycle.onMessageEnd(agentMsg.role, outputTokens);
