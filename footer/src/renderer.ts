@@ -42,7 +42,7 @@ function buildSegments(input: FooterInput, cf: ColorFn): SegmentMap {
 		tokensTotal: cfg.showTokens
 			? formatTotalOnlyTokens(input.totals, cf, cfg.colors.tokens)
 			: undefined,
-		toks: cfg.showToks ? toksSegment(input, cf) : undefined,
+		toks: toksSegment(input, cf),
 	};
 }
 
@@ -84,7 +84,7 @@ function contextSegment(input: FooterInput, cf: ColorFn): string {
 }
 
 function toksSegment(input: FooterInput, cf: ColorFn): string | undefined {
-	if (input.lastTokPerSec === undefined || input.lastTokPerSec <= 0) return undefined;
+	if (input.lastTokPerSec === undefined) return cf(input.config.colors.tokens, "0 tok/s");
 	return cf(input.config.colors.tokens, `${Math.round(input.lastTokPerSec)} tok/s`);
 }
 

@@ -182,25 +182,25 @@ describe("renderFooter", () => {
 		expect(line).toContain("82 tok/s");
 	});
 
-	it("hides toks when lastTokPerSec is undefined", () => {
+	it("shows 0 tok/s when lastTokPerSec is undefined", () => {
 		const input = makeInput({ lastTokPerSec: undefined });
 		const [line] = renderFooter(input, plainTheme, 100);
-		expect(line).not.toContain("tok/s");
+		expect(line).toContain("0 tok/s");
 	});
 
-	it("hides toks when lastTokPerSec is 0", () => {
+	it("shows 0 tok/s when lastTokPerSec is 0", () => {
 		const input = makeInput({ lastTokPerSec: 0 });
 		const [line] = renderFooter(input, plainTheme, 100);
-		expect(line).not.toContain("tok/s");
+		expect(line).toContain("0 tok/s");
 	});
 
-	it("hides toks when showToks is false", () => {
+	it("shows toks regardless of showToks config", () => {
 		const input = makeInput({
 			lastTokPerSec: 82,
 			configOverrides: { showToks: false },
 		});
 		const [line] = renderFooter(input, plainTheme, 100);
-		expect(line).not.toContain("tok/s");
+		expect(line).toContain("82 tok/s");
 	});
 
 	it("shows toks at default config", () => {
