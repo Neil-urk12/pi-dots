@@ -469,6 +469,56 @@ describe("FooterLifecycle", () => {
 				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
 		});
 
+		it("weighs CJK punctuation lower than CJK ideographs", () => {
+			const { lifecycle: punctLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			punctLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 CJK punctuation chars
+			punctLife.onMessageUpdate("text_delta", "。、〈〉《》「」『』【】");
+
+			const { lifecycle: ideographLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			ideographLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 CJK ideographs
+			ideographLife.onMessageUpdate("text_delta", "你好世界测试中文输入法来");
+
+			const punctInput = punctLife.getFooterInput(makeMockCtx());
+			const ideographInput = ideographLife.getFooterInput(makeMockCtx());
+
+			expect(punctInput.toksState.state).toBe("rate");
+			expect(ideographInput.toksState.state).toBe("rate");
+			// Punctuation should weigh strictly less than ideographs
+			expect((punctInput.toksState as { value: number }).value)
+				.toBeLessThan((ideographInput.toksState as { value: number }).value);
+		});
+
+		it("weighs Latin extended at 0.5 tokens per char (TOK_OTHER)", () => {
+			const { lifecycle: latinLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			latinLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 Latin extended chars (Cyrillic) — weight 0.5 each → 12×0.5=6
+			latinLife.onMessageUpdate("text_delta", "абвгдежзиклм");
+
+			const { lifecycle: asciiLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			asciiLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 ASCII chars — weight 0.25 each → 12×0.25=3
+			asciiLife.onMessageUpdate("text_delta", "abcdefghijkl");
+
+			const latinInput = latinLife.getFooterInput(makeMockCtx());
+			const asciiInput = asciiLife.getFooterInput(makeMockCtx());
+
+			expect(latinInput.toksState.state).toBe("rate");
+			expect(asciiInput.toksState.state).toBe("rate");
+			// Non-ASCII scripts should weigh more than ASCII
+			expect((latinInput.toksState as { value: number }).value)
+				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
+		});
+
 		// ── Finding 2: Dirty flag batching ─────────────────────
 
 		it("batches displayState updates across rapid deltas (dirty flag)", () => {
