@@ -83,9 +83,13 @@ function contextSegment(input: FooterInput, cf: ColorFn): string {
 	return cf(input.config.colors.contextNormal, text);
 }
 
-function toksSegment(input: FooterInput, cf: ColorFn): string {
-	if (input.lastTokPerSec === undefined) return cf(input.config.colors.tokens, "0 tok/s");
-	return cf(input.config.colors.tokens, `${Math.round(input.lastTokPerSec)} tok/s`);
+function toksSegment(input: FooterInput, cf: ColorFn): string | undefined {
+	const ts = input.toksState;
+	if (ts.state === "hidden") return undefined;
+	if (ts.state === "pending") return cf(input.config.colors.tokens, "… tok/s");
+	const rounded = Math.round(ts.value);
+	if (ts.approximate) return cf(input.config.colors.tokens, `≈${rounded} tok/s`);
+	return cf(input.config.colors.tokens, `${rounded} tok/s`);
 }
 
 // ── Private: width-tier branching ──────────────────────────────

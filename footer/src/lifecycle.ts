@@ -2,16 +2,53 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 
 import { defaultConfig, loadFooterConfig, type ResolvedConfig } from "./config.js";
-import type { FooterInput, Totals } from "./types.js";
+import type { FooterInput, Totals, ToksDisplayState } from "./types.js";
 import { createGitState, type GitStateHandle } from "./git.js";
 import { accumulateTotals } from "./tokens.js";
 import { normalizeThinkingLevel } from "./utils.js";
+
+// ── CJK-aware token estimation ────────────────────────────────
+
+function estimateTokens(text: string): number {
+	let total = 0;
+	for (const char of text) {
+		const cp = char.codePointAt(0) ?? 0;
+		if (cp >= 0x20 && cp <= 0x7E) {
+			// ASCII printable
+			total += 0.25;
+		} else if (
+			(cp >= 0x4e00 && cp <= 0x9fff) || // CJK Unified Ideographs
+			(cp >= 0x3400 && cp <= 0x4dbf) || // CJK Extension A
+			(cp >= 0xf900 && cp <= 0xfaff) || // CJK Compatibility Ideographs
+			(cp >= 0x3000 && cp <= 0x303f) || // CJK Symbols and Punctuation
+			(cp >= 0x3040 && cp <= 0x309f) || // Hiragana
+			(cp >= 0x30a0 && cp <= 0x30ff) || // Katakana
+			(cp >= 0xac00 && cp <= 0xd7af) // Hangul Syllables
+		) {
+			total += 0.67;
+		} else if (cp > 0xffff) {
+			// Emoji / non-BMP: 2 UTF-16 code units = 1 token
+			total += 1;
+		} else {
+			// Everything else (Latin extended, Cyrillic, etc.)
+			total += 0.5;
+		}
+	}
+	return Math.ceil(total);
+}
 
 type LifecycleOptions = {
 	globalConfigPath: string;
 	getProjectConfigPath: (cwd: string) => string;
 	getThinkingLevel: () => string | undefined;
 	onRenderNeeded: () => void;
+};
+
+type ToksSample = {
+	startTime: number;
+	estimatedTokens: number;
+	hasObservedOutput: boolean;
+	displayState: ToksDisplayState;
 };
 
 export class FooterLifecycle {
@@ -27,8 +64,9 @@ export class FooterLifecycle {
 	#onRenderNeeded: () => void;
 	#cachedTotals: Totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	#cachedBranchLength: number = 0;
-	#messageStartTime: number | undefined = undefined;
-	#lastTokPerSec: number | undefined = undefined;
+	#toksSample: ToksSample | undefined = undefined;
+	#toksThrottleTimer: ReturnType<typeof setTimeout> | undefined = undefined;
+	#toksDirty: boolean = false;
 
 	constructor(opts: LifecycleOptions) {
 		this.#globalConfigPath = opts.globalConfigPath;
@@ -63,13 +101,10 @@ export class FooterLifecycle {
 		}
 	}
 
-	shutdown(): void {
+shutdown(): void {
 		this.#git?.clear();
 		this.#git = undefined;
-		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-		this.#cachedBranchLength = 0;
-		this.#messageStartTime = undefined;
-		this.#lastTokPerSec = undefined;
+		this.#resetState();
 	}
 
 	#createGit(cwd: string): void {
@@ -94,21 +129,105 @@ export class FooterLifecycle {
 
 	onMessageStart(role: string): void {
 		if (role === "assistant") {
-			this.#messageStartTime = Date.now();
+			this.#toksSample = {
+				startTime: Date.now(),
+				estimatedTokens: 0,
+				hasObservedOutput: false,
+				displayState: { state: "pending" },
+			};
+			this.#onRenderNeeded();
+		}
+	}
+
+	onMessageUpdate(eventType: string, delta?: string): void {
+		if (!this.#toksSample || !delta) return;
+		if (eventType !== "text_delta" && eventType !== "thinking_delta" && eventType !== "toolcall_delta") return;
+
+		this.#toksSample.estimatedTokens += estimateTokens(delta);
+		this.#toksSample.hasObservedOutput = true;
+		this.#toksDirty = true;
+
+		const elapsed = (Date.now() - this.#toksSample.startTime) / 1000;
+		if (elapsed > 0) {
+			this.#toksSample.displayState = {
+				state: "rate",
+				value: this.#toksSample.estimatedTokens / elapsed,
+				approximate: true,
+			};
+		}
+
+		if (!this.#toksThrottleTimer) {
+			this.#toksThrottleTimer = setTimeout(() => {
+				this.#toksThrottleTimer = undefined;
+				if (this.#toksDirty) {
+					this.#toksDirty = false;
+					this.#onRenderNeeded();
+				}
+			}, 250);
 		}
 	}
 
 	onMessageEnd(role: string, outputTokens?: number): void {
 		if (role === "assistant") {
-			if (this.#messageStartTime !== undefined && outputTokens && outputTokens > 0) {
-				const elapsed = Date.now() - this.#messageStartTime;
-				if (elapsed > 0) {
-					this.#lastTokPerSec = outputTokens / (elapsed / 1000);
+			if (this.#toksSample) {
+				const elapsed = (Date.now() - this.#toksSample.startTime) / 1000;
+				if (outputTokens && outputTokens > 0 && elapsed > 0) {
+					this.#toksSample.displayState = {
+						state: "rate",
+						value: outputTokens / elapsed,
+						approximate: false,
+					};
+				} else if (this.#toksSample.hasObservedOutput && elapsed > 0) {
+					this.#toksSample.displayState = {
+						state: "rate",
+						value: this.#toksSample.estimatedTokens / elapsed,
+						approximate: true,
+					};
+				} else {
+					this.#toksSample = undefined;
 				}
 			}
-			this.#messageStartTime = undefined;
+			this.#clearToksThrottle();
 			this.#onRenderNeeded();
 		}
+	}
+
+	/**
+	 * Pre-wired for a future `message_abort` event in the pi extension API.
+	 * No such event exists yet — this method is not currently reachable.
+	 */
+	onMessageAbort(): void {
+		if (this.#toksSample) {
+			if (this.#toksSample.hasObservedOutput) {
+				const elapsed = (Date.now() - this.#toksSample.startTime) / 1000;
+				if (elapsed > 0) {
+					this.#toksSample.displayState = {
+						state: "rate",
+						value: this.#toksSample.estimatedTokens / elapsed,
+						approximate: true,
+					};
+				}
+			} else {
+				this.#toksSample = undefined;
+			}
+		}
+		this.#clearToksThrottle();
+		this.#onRenderNeeded();
+	}
+
+	#clearToksThrottle(): void {
+		if (this.#toksThrottleTimer) {
+			clearTimeout(this.#toksThrottleTimer);
+			this.#toksThrottleTimer = undefined;
+			this.#toksDirty = false;
+		}
+	}
+
+	#resetState(): void {
+		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		this.#cachedBranchLength = 0;
+		this.#toksSample = undefined;
+		this.#clearToksThrottle();
 	}
 
 	onToolEnd(toolName: string): void {
@@ -128,11 +247,8 @@ export class FooterLifecycle {
 		await this.#git?.refresh();
 	}
 
-	async reload(ctx: ExtensionContext): Promise<void> {
-		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-		this.#cachedBranchLength = 0;
-		this.#messageStartTime = undefined;
-		this.#lastTokPerSec = undefined;
+async reload(ctx: ExtensionContext): Promise<void> {
+		this.#resetState();
 		this.#loadedConfig = loadFooterConfig(
 			this.#globalConfigPath,
 			this.#getProjectConfigPath(ctx.cwd),
@@ -151,11 +267,8 @@ export class FooterLifecycle {
 		this.#onRenderNeeded();
 	}
 
-	async toggle(): Promise<boolean> {
-		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-		this.#cachedBranchLength = 0;
-		this.#messageStartTime = undefined;
-		this.#lastTokPerSec = undefined;
+async toggle(): Promise<boolean> {
+		this.#resetState();
 		this.#footerEnabled = !this.#footerEnabled;
 		if (!this.#footerEnabled) {
 			this.#git?.clear();
@@ -186,7 +299,7 @@ export class FooterLifecycle {
 			contextUsed: ctx.getContextUsage?.()?.tokens ?? 0,
 			contextMax: ctx.model?.contextWindow,
 			totals: this.#cachedTotals,
-			lastTokPerSec: this.#lastTokPerSec,
+			toksState: this.#toksSample?.displayState ?? { state: "hidden" },
 			config: this.#config,
 		};
 	}
