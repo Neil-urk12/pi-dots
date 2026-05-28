@@ -6,6 +6,7 @@ import type { FooterInput, Totals, ToksDisplayState } from "./types.js";
 import { createGitState, type GitStateHandle } from "./git.js";
 import { accumulateTotals } from "./tokens.js";
 import { normalizeThinkingLevel } from "./utils.js";
+import { normalizeToolLabel } from "./tokLabels.js";
 
 // ── CJK-aware token estimation ────────────────────────────────
 
@@ -15,6 +16,11 @@ const TOK_CJK_IDEO = 0.67; // CJK ideographs, kana, hangul
 const TOK_CJK_PUNCT = 0.5; // CJK Symbols & Punctuation (0x3000-0x303f)
 const TOK_NON_BMP = 1; // Emoji / non-BMP (U+10000+): 2 UTF-16 units ≈ 1 token
 const TOK_OTHER = 0.5; // Latin extended, Cyrillic, etc.
+
+// ── Activity animation constants ─────────────────────────────
+const ACTIVITY_CADENCE_MS = 300;
+const FINAL_RATE_HIDE_MS = 5000;
+const ACTIVITY_DOT_FRAMES = [".  ", ".. ", "..."];
 
 function estimateTokens(text: string): number {
 	let total = 0;
@@ -78,6 +84,11 @@ export class FooterLifecycle {
 	#toksSample: ToksSample | undefined = undefined;
 	#toksThrottleTimer: ReturnType<typeof setTimeout> | undefined = undefined;
 	#toksDirty: boolean = false;
+	#activeToolCount: number = 0;
+	#latestToolLabel: string = "";
+	#activityDotIndex: number = 0;
+	#activityTimer: ReturnType<typeof setTimeout> | undefined = undefined;
+	#endsAtTimer: ReturnType<typeof setTimeout> | undefined = undefined;
 
 	constructor(opts: LifecycleOptions) {
 		this.#globalConfigPath = opts.globalConfigPath;
@@ -140,6 +151,7 @@ shutdown(): void {
 
 	onMessageStart(role: string): void {
 		if (role === "assistant") {
+			this.#stopEndsAtTimer();
 			this.#toksSample = {
 				startTime: Date.now(),
 				estimatedTokens: 0,
@@ -148,6 +160,30 @@ shutdown(): void {
 			};
 			this.#onRenderNeeded();
 		}
+	}
+
+	onToolExecutionStart(toolName: string): void {
+		this.#activeToolCount++;
+		this.#latestToolLabel = normalizeToolLabel(toolName) + "...";
+		this.#activityDotIndex = 0;
+		this.#startActivityTimer();
+		this.#onRenderNeeded();
+	}
+
+	onToolExecutionUpdate(_toolName: string): void {
+		// Activity timer already handles dot cycling; nothing to do here.
+	}
+
+	onToolExecutionEnd(toolName: string): void {
+		this.#activeToolCount = Math.max(0, this.#activeToolCount - 1);
+		if (this.#activeToolCount === 0) {
+		this.#stopActivityTimer();
+		}
+		// Still schedule git refresh for relevant tools
+		if (["bash", "edit", "write"].includes(toolName)) {
+			this.#git?.schedule();
+		}
+		this.#onRenderNeeded();
 	}
 
 	onMessageUpdate(eventType: string, delta?: string): void {
@@ -180,6 +216,8 @@ shutdown(): void {
 
 	onMessageEnd(role: string, outputTokens?: number): void {
 		if (role === "assistant") {
+			this.#activeToolCount = 0;
+			this.#stopActivityTimer();
 			if (this.#toksSample) {
 				const elapsed = (Date.now() - this.#toksSample.startTime) / 1000;
 				if (outputTokens && outputTokens > 0 && elapsed > 0) {
@@ -188,12 +226,14 @@ shutdown(): void {
 						value: outputTokens / elapsed,
 						approximate: false,
 					};
+					this.#scheduleEndsAt();
 				} else if (this.#toksSample.hasObservedOutput && elapsed > 0) {
 					this.#toksSample.displayState = {
 						state: "rate",
 						value: this.#toksSample.estimatedTokens / elapsed,
 						approximate: true,
 					};
+					this.#scheduleEndsAt();
 				} else {
 					this.#toksSample = undefined;
 				}
@@ -239,13 +279,44 @@ shutdown(): void {
 		this.#cachedBranchLength = 0;
 		this.#toksSample = undefined;
 		this.#clearToksThrottle();
+		this.#activeToolCount = 0;
+		this.#latestToolLabel = "";
+		this.#activityDotIndex = 0;
+		this.#stopActivityTimer();
+		this.#stopEndsAtTimer();
 	}
 
-	onToolEnd(toolName: string): void {
-		if (["bash", "edit", "write"].includes(toolName)) {
-			this.#git?.schedule();
+	#startActivityTimer(): void {
+		this.#stopActivityTimer();
+		this.#activityTimer = setInterval(() => {
+			this.#activityDotIndex = (this.#activityDotIndex + 1) % ACTIVITY_DOT_FRAMES.length;
+			this.#onRenderNeeded();
+		}, ACTIVITY_CADENCE_MS);
+	}
+
+	#stopActivityTimer(): void {
+		if (this.#activityTimer) {
+			clearInterval(this.#activityTimer);
+			this.#activityTimer = undefined;
 		}
-		this.#onRenderNeeded();
+	}
+
+	#scheduleEndsAt(): void {
+		this.#stopEndsAtTimer();
+		this.#endsAtTimer = setTimeout(() => {
+			this.#endsAtTimer = undefined;
+			if (this.#toksSample) {
+				this.#toksSample = undefined;
+				this.#onRenderNeeded();
+			}
+		}, FINAL_RATE_HIDE_MS);
+	}
+
+	#stopEndsAtTimer(): void {
+		if (this.#endsAtTimer) {
+			clearTimeout(this.#endsAtTimer);
+			this.#endsAtTimer = undefined;
+		}
 	}
 
 	onUserBash(): void {
@@ -310,9 +381,18 @@ async toggle(): Promise<boolean> {
 			contextUsed: ctx.getContextUsage?.()?.tokens ?? 0,
 			contextMax: ctx.model?.contextWindow,
 			totals: this.#cachedTotals,
-			toksState: this.#toksSample?.displayState ?? { state: "hidden" },
+			toksState: this.#computeToksState(),
 			config: this.#config,
 		};
+	}
+
+	#computeToksState(): ToksDisplayState {
+		// Tool activity takes priority
+		if (this.#activeToolCount > 0) {
+			return { state: "activity", label: this.#latestToolLabel };
+		}
+		// Fall back to toksSample state
+		return this.#toksSample?.displayState ?? { state: "hidden" };
 	}
 
 	// ── Getters ────────────────────────────────────────────────────

@@ -111,8 +111,16 @@ export default function (pi: ExtensionAPI) {
 		}
 	});
 
+	pi.on("tool_execution_start", (event) => {
+		lifecycle.onToolExecutionStart(event.toolName);
+	});
+
+	pi.on("tool_execution_update", (event) => {
+		lifecycle.onToolExecutionUpdate(event.toolName);
+	});
+
 	pi.on("tool_execution_end", (event) => {
-		lifecycle.onToolEnd(event.toolName);
+		lifecycle.onToolExecutionEnd(event.toolName);
 	});
 
 	pi.on("user_bash", () => {
