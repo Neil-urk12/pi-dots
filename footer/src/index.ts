@@ -103,6 +103,14 @@ export default function (pi: ExtensionAPI) {
 		lifecycle.onMessageEnd(agentMsg.role, outputTokens);
 	});
 
+	pi.on("message_update", (event) => {
+		const streamEvent = event.assistantMessageEvent;
+		if (event.message.role === "assistant") {
+			const delta = "delta" in streamEvent ? streamEvent.delta : undefined;
+			lifecycle.onMessageUpdate(streamEvent.type, delta);
+		}
+	});
+
 	pi.on("tool_execution_end", (event) => {
 		lifecycle.onToolEnd(event.toolName);
 	});
