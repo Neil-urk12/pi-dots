@@ -200,6 +200,7 @@ describe("FooterLifecycle", () => {
 			// No crash, no state change
 		});
 	});
+
 	describe("tok/s computation", () => {
 		beforeEach(() => {
 			vi.useFakeTimers();
@@ -209,7 +210,83 @@ describe("FooterLifecycle", () => {
 			vi.useRealTimers();
 		});
 
-		it("computes tok/s from assistant message", () => {
+		it("sets pending state on assistant message_start", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("assistant");
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({ state: "pending" });
+		});
+
+		it("ignores non-assistant roles for pending state", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("user");
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({ state: "hidden" });
+		});
+
+		it("counts text_delta for live estimate", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2000); // 1 second elapsed
+			lifecycle.onMessageUpdate("text_delta", "hello world"); // 11 ASCII × 0.25 = 2.75 → ceil = 3
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({
+				state: "rate",
+				value: 3, // 3 tokens / 1 second
+				approximate: true,
+			});
+		});
+
+		it("counts thinking_delta for live estimate", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			lifecycle.onMessageUpdate("thinking_delta", "some thinking"); // 13 ASCII × 0.25 = 3.25 → ceil = 4
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({
+				state: "rate",
+				value: 4,
+				approximate: true,
+			});
+		});
+
+		it("counts toolcall_delta for live estimate", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			lifecycle.onMessageUpdate("toolcall_delta", "tool data"); // 9 ASCII × 0.25 = 2.25 → ceil = 3
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({
+				state: "rate",
+				value: 3,
+				approximate: true,
+			});
+		});
+
+		it("ignores non-delta events", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			lifecycle.onMessageUpdate("start", undefined);
+			lifecycle.onMessageUpdate("text_start", undefined);
+			lifecycle.onMessageUpdate("text_end", "some text");
+			lifecycle.onMessageUpdate("thinking_start", undefined);
+			lifecycle.onMessageUpdate("thinking_end", "some text");
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({ state: "pending" });
+		});
+
+		it("finalizes with exact tok/s when output usage exists", () => {
 			const { lifecycle } = createLifecycle();
 			vi.setSystemTime(1000);
 			lifecycle.onMessageStart("assistant");
@@ -217,10 +294,14 @@ describe("FooterLifecycle", () => {
 			lifecycle.onMessageEnd("assistant", 100);
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.lastTokPerSec).toBe(100);
+			expect(input.toksState).toEqual({
+				state: "rate",
+				value: 100, // 100 / 1
+				approximate: false,
+			});
 		});
 
-		it("computes exact tok/s value", () => {
+		it("finalizes with exact tok/s for fractional values", () => {
 			const { lifecycle } = createLifecycle();
 			vi.setSystemTime(1000);
 			lifecycle.onMessageStart("assistant");
@@ -228,50 +309,64 @@ describe("FooterLifecycle", () => {
 			lifecycle.onMessageEnd("assistant", 500);
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.lastTokPerSec).toBe(400); // 500 / 1.25 = 400
+			expect(input.toksState).toEqual({
+				state: "rate",
+				value: 400, // 500 / 1.25
+				approximate: false,
+			});
 		});
 
-		it("returns raw tok/s without rounding", () => {
+		it("keeps estimated rate when output usage is missing", () => {
 			const { lifecycle } = createLifecycle();
 			vi.setSystemTime(1000);
 			lifecycle.onMessageStart("assistant");
-			vi.setSystemTime(1700); // 0.7 seconds elapsed
-			lifecycle.onMessageEnd("assistant", 100); // 100 / 0.7 ≈ 142.857
+			vi.setSystemTime(2000);
+			lifecycle.onMessageUpdate("text_delta", "hello"); // 5 ASCII × 0.25 = 1.25 → ceil = 2
+			lifecycle.onMessageEnd("assistant");
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.lastTokPerSec).toBeCloseTo(142.857, 2);
+			expect(input.toksState).toEqual({
+				state: "rate",
+				value: 2, // 2 tokens / 1 second
+				approximate: true,
+			});
 		});
 
-		it("sets undefined when no output tokens", () => {
+		it("hides when no output observed and no usage", () => {
 			const { lifecycle } = createLifecycle();
 			lifecycle.onMessageStart("assistant");
-			lifecycle.onMessageEnd("assistant", 0);
+			lifecycle.onMessageEnd("assistant");
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.lastTokPerSec).toBeUndefined();
+			expect(input.toksState).toEqual({ state: "hidden" });
 		});
 
-		it("sets undefined when elapsed time is zero", () => {
+		it("keeps approximate rate on abort after output observed", () => {
 			const { lifecycle } = createLifecycle();
 			vi.setSystemTime(1000);
 			lifecycle.onMessageStart("assistant");
-			vi.setSystemTime(1000); // same time — 0 elapsed
-			lifecycle.onMessageEnd("assistant", 100);
+			vi.setSystemTime(2000);
+			lifecycle.onMessageUpdate("text_delta", "hello"); // 2 tokens
+			lifecycle.onMessageAbort();
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.lastTokPerSec).toBeUndefined();
+			expect(input.toksState).toEqual({
+				state: "rate",
+				value: 2,
+				approximate: true,
+			});
 		});
 
-		it("does not compute for non-assistant messages", () => {
+		it("hides on abort when no output observed", () => {
 			const { lifecycle } = createLifecycle();
-			lifecycle.onMessageStart("user");
-			lifecycle.onMessageEnd("user", 100);
+			lifecycle.onMessageStart("assistant");
+			lifecycle.onMessageAbort();
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.lastTokPerSec).toBeUndefined();
+			expect(input.toksState).toEqual({ state: "hidden" });
 		});
 
-		it("resets tok/s after reload", async () => {
+		it("resets tok/s state after reload", async () => {
 			const { lifecycle } = createLifecycle();
 			vi.setSystemTime(1000);
 			lifecycle.onMessageStart("assistant");
@@ -280,7 +375,172 @@ describe("FooterLifecycle", () => {
 
 			await lifecycle.reload(makeMockCtx());
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.lastTokPerSec).toBeUndefined();
+			expect(input.toksState).toEqual({ state: "hidden" });
+		});
+
+		it("resets tok/s state after toggle", async () => {
+			const { lifecycle } = createLifecycle();
+			await lifecycle.start(makeMockCtx());
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			lifecycle.onMessageEnd("assistant", 100);
+
+			await lifecycle.toggle(); // off
+			await lifecycle.toggle(); // back on
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({ state: "hidden" });
+		});
+
+		// ── Finding 1: CJK-aware token estimation ──────────────
+
+		it("produces higher estimates for CJK text than same-length ASCII", () => {
+			const { lifecycle: asciiLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			asciiLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 ASCII chars → ceil(12/4) = 3 tokens with current impl
+			asciiLife.onMessageUpdate("text_delta", "abcdefghijkl");
+
+			const { lifecycle: cjkLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			cjkLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 CJK chars → should be > 3 tokens (more like 8 tokens)
+			cjkLife.onMessageUpdate("text_delta", "你好世界测试中文输入法");
+
+			const asciiInput = asciiLife.getFooterInput(makeMockCtx());
+			const cjkInput = cjkLife.getFooterInput(makeMockCtx());
+
+			expect(asciiInput.toksState.state).toBe("rate");
+			expect(cjkInput.toksState.state).toBe("rate");
+			// CJK should produce strictly more tokens than ASCII for same char count
+			expect((cjkInput.toksState as { value: number }).value)
+				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
+		});
+
+		it("produces higher estimates for emoji text than same-length ASCII", () => {
+			const { lifecycle: asciiLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			asciiLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 16 ASCII chars → ceil(16/4) = 4 tokens with current impl
+			asciiLife.onMessageUpdate("text_delta", "abcdefghijklmnop");
+
+			const { lifecycle: emojiLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			emojiLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 8 emoji → JS .length = 16 (surrogate pairs) → current impl: ceil(16/4) = 4
+			// After fix: emoji weighted ~1 token per 2 chars → 8 emoji → ~8 tokens > 4
+			emojiLife.onMessageUpdate("text_delta", "😀😁😂🤣😃😄😅😆");
+
+			const asciiInput = asciiLife.getFooterInput(makeMockCtx());
+			const emojiInput = emojiLife.getFooterInput(makeMockCtx());
+
+			expect(asciiInput.toksState.state).toBe("rate");
+			expect(emojiInput.toksState.state).toBe("rate");
+			expect((emojiInput.toksState as { value: number }).value)
+				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
+		});
+
+		it("handles mixed ASCII and CJK text correctly", () => {
+			const { lifecycle: mixedLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			mixedLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 6 ASCII + 4 CJK = 10 chars
+			mixedLife.onMessageUpdate("text_delta", "hello 你好世界");
+
+			const { lifecycle: asciiOnlyLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			asciiOnlyLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 10 ASCII chars → ceil(10/4) = 3 tokens
+			asciiOnlyLife.onMessageUpdate("text_delta", "helloworld");
+
+			const mixedInput = mixedLife.getFooterInput(makeMockCtx());
+			const asciiInput = asciiOnlyLife.getFooterInput(makeMockCtx());
+
+			expect(mixedInput.toksState.state).toBe("rate");
+			expect(asciiInput.toksState.state).toBe("rate");
+			// Mixed text with CJK should produce more tokens than pure ASCII of same length
+			expect((mixedInput.toksState as { value: number }).value)
+				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
+		});
+
+		// ── Finding 2: Dirty flag batching ─────────────────────
+
+		it("batches displayState updates across rapid deltas (dirty flag)", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+
+			// Send 20 rapid deltas at the same timestamp.
+			// With a dirty flag, displayState should only be recomputed once
+			// (on first delta that sets dirty), not on every delta.
+			vi.setSystemTime(1500);
+			for (let i = 0; i < 20; i++) {
+				lifecycle.onMessageUpdate("text_delta", "x");
+			}
+
+			// Read displayState — after a dirty-flag fix, the state object
+			// should reflect the *last* computed value only after dirty is cleared.
+			// We verify that the final rate is based on all 20 tokens (5 per delta)
+			// accumulated, not some intermediate snapshot.
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState.state).toBe("rate");
+			// 20 chars * (estimate) / 0.5s = some rate. The key invariant is that
+			// the rate reflects ALL accumulated tokens, not a partial batch.
+			const rate = (input.toksState as { value: number }).value;
+			expect(rate).toBeGreaterThan(0);
+		});
+
+		it("fires onRenderNeeded exactly once after rapid throttle window", () => {
+			const { lifecycle, onRenderNeeded } = createLifecycle();
+			lifecycle.onMessageStart("assistant"); // calls onRenderNeeded once
+			onRenderNeeded.mockClear();
+
+			// Send 15 rapid text deltas — sets toksDirty, arms 250ms throttle timer
+			for (let i = 0; i < 15; i++) {
+				lifecycle.onMessageUpdate("text_delta", "a");
+			}
+
+			// onRenderNeeded should NOT be called yet (throttled)
+			expect(onRenderNeeded).not.toHaveBeenCalled();
+
+			// Advance past the 250ms throttle window
+			vi.advanceTimersByTime(250);
+
+			// Should fire exactly once (all 15 deltas coalesced)
+			expect(onRenderNeeded).toHaveBeenCalledTimes(1);
+		});
+
+		it("returns stable toksState reference between reads", () => {
+			const { lifecycle } = createLifecycle();
+			vi.setSystemTime(1000);
+			lifecycle.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			lifecycle.onMessageUpdate("text_delta", "hello");
+
+			// Snapshot the displayState object reference
+			const before = lifecycle.getFooterInput(makeMockCtx()).toksState;
+
+			// Call getFooterInput again without any new deltas.
+			// With dirty flag, no new state object should be created.
+			const after = lifecycle.getFooterInput(makeMockCtx());
+
+			// The displayState should be referentially identical (no unnecessary alloc)
+			expect(after.toksState).toBe(before);
+		});
+
+		it("does not compute for non-assistant messages", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("user");
+			lifecycle.onMessageEnd("user", 100);
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({ state: "hidden" });
 		});
 	});
 

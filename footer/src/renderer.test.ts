@@ -43,6 +43,7 @@ function makeInput(
 		contextUsed: 50_000,
 		contextMax: 200_000,
 		totals: { input: 1500, output: 500, cacheRead: 200, cacheWrite: 100 },
+		toksState: { state: "hidden" },
 		config: configOverrides ? { ...defaultConfig, ...configOverrides } : defaultConfig,
 		...rest,
 	};
@@ -176,42 +177,48 @@ describe("renderFooter", () => {
 
 	// ── Toks segment ────────────────────────────────────────
 
-	it("shows toks when lastTokPerSec is set", () => {
-		const input = makeInput({ lastTokPerSec: 82 });
+	it("shows exact rate when toksState is rate", () => {
+		const input = makeInput({ toksState: { state: "rate", value: 82, approximate: false } });
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain("82 tok/s");
 	});
 
-	it("shows 0 tok/s when lastTokPerSec is undefined", () => {
-		const input = makeInput({ lastTokPerSec: undefined });
+	it("hides when toksState is hidden", () => {
+		const input = makeInput({ toksState: { state: "hidden" } });
 		const [line] = renderFooter(input, plainTheme, 100);
-		expect(line).toContain("0 tok/s");
+		expect(line).not.toContain("tok/s");
 	});
 
-	it("shows 0 tok/s when lastTokPerSec is 0", () => {
-		const input = makeInput({ lastTokPerSec: 0 });
+	it("shows pending state", () => {
+		const input = makeInput({ toksState: { state: "pending" } });
 		const [line] = renderFooter(input, plainTheme, 100);
-		expect(line).toContain("0 tok/s");
+		expect(line).toContain("… tok/s");
+	});
+
+	it("shows approximate rate with ≈", () => {
+		const input = makeInput({ toksState: { state: "rate", value: 45.6, approximate: true } });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain("≈46 tok/s");
+	});
+
+	it("rounds tok/s to integer in display", () => {
+		const input = makeInput({ toksState: { state: "rate", value: 82.7, approximate: false } });
+		const [line] = renderFooter(input, plainTheme, 100);
+		expect(line).toContain("83 tok/s");
 	});
 
 	it("shows toks always regardless of config", () => {
 		const input = makeInput({
-			lastTokPerSec: 82,
+			toksState: { state: "rate", value: 82, approximate: false },
 		});
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain("82 tok/s");
 	});
 
 	it("shows toks at default config", () => {
-		const input = makeInput({ lastTokPerSec: 150 });
+		const input = makeInput({ toksState: { state: "rate", value: 150, approximate: false } });
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain("150 tok/s");
-	});
-
-	it("rounds tok/s to integer in display", () => {
-		const input = makeInput({ lastTokPerSec: 82.7 });
-		const [line] = renderFooter(input, plainTheme, 100);
-		expect(line).toContain("83 tok/s");
 	});
 
 	it("hides cache read when showCacheRead is false", () => {

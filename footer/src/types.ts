@@ -18,6 +18,12 @@ export type Totals = {
 	cacheWrite: number;
 };
 
+/** Live tok/s display state for the footer segment. */
+export type ToksDisplayState =
+	| { state: "hidden" }
+	| { state: "pending" }
+	| { state: "rate"; value: number; approximate: boolean };
+
 /** Snapshot assembled by the lifecycle and fed to the renderer. */
 export type FooterInput = {
 	modelId: string;
@@ -28,7 +34,7 @@ export type FooterInput = {
 	contextUsed: number;
 	contextMax?: number;
 	totals: Totals;
-	lastTokPerSec?: number;
+	toksState: ToksDisplayState;
 	config: ResolvedConfig;
 };
 
