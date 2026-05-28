@@ -28,7 +28,12 @@ function estimateTokens(text: string): number {
 			(cp >= 0xf900 && cp <= 0xfaff) || // CJK Compatibility Ideographs
 			(cp >= 0x3040 && cp <= 0x309f) || // Hiragana
 			(cp >= 0x30a0 && cp <= 0x30ff) || // Katakana
-			(cp >= 0xac00 && cp <= 0xd7af) // Hangul Syllables
+			(cp >= 0xac00 && cp <= 0xd7af) || // Hangul Syllables
+			(cp >= 0x2e80 && cp <= 0x2fdf) || // CJK Radicals Supplement + Kangxi Radicals
+			(cp >= 0x3100 && cp <= 0x312e) || // Bopomofo
+			(cp >= 0x31f0 && cp <= 0x31ff) || // Katakana Phonetic Extensions
+			(cp >= 0xff01 && cp <= 0xff5e) || // Fullwidth ASCII forms (excludes currency symbols)
+			(cp >= 0xff65 && cp <= 0xff9f) // Halfwidth Katakana
 		) {
 			total += TOK_CJK_IDEO;
 		} else if (cp >= 0x3000 && cp <= 0x303f) {
