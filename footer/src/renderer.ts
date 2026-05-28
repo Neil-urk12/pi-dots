@@ -86,6 +86,7 @@ function contextSegment(input: FooterInput, cf: ColorFn): string {
 function toksSegment(input: FooterInput, cf: ColorFn): string | undefined {
 	const ts = input.toksState;
 	if (ts.state === "hidden") return undefined;
+	if (ts.state === "activity") return cf(input.config.colors.tokens, ts.label);
 	if (ts.state === "pending") return cf(input.config.colors.tokens, "… tok/s");
 	const rounded = Math.round(ts.value);
 	if (ts.approximate) return cf(input.config.colors.tokens, `≈${rounded} tok/s`);

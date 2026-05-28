@@ -22,8 +22,8 @@ export type Totals = {
 export type ToksDisplayState =
 	| { state: "hidden" }
 	| { state: "pending" }
-	| { state: "rate"; value: number; approximate: boolean };
-
+	| { state: "rate"; value: number; approximate: boolean }
+	| { state: "activity"; label: string };
 /** Snapshot assembled by the lifecycle and fed to the renderer. */
 export type FooterInput = {
 	modelId: string;
