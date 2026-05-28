@@ -519,6 +519,172 @@ describe("FooterLifecycle", () => {
 				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
 		});
 
+		it("weighs Halfwidth & Fullwidth Forms (0xFF00-0xFFEF) same as CJK ideographs", () => {
+			const { lifecycle: fullwidthLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			fullwidthLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 fullwidth Latin chars — if TOK_CJK_IDEO: 12×0.67=8.04, if TOK_OTHER: 12×0.5=6
+			fullwidthLife.onMessageUpdate("text_delta", "ＡＢＣＤＥＦＧＨＩＪＫＬ");
+
+			const { lifecycle: cjkLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			cjkLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 CJK ideograph chars — TOK_CJK_IDEO: 12×0.67=8.04
+			cjkLife.onMessageUpdate("text_delta", "你好世界测试中文输入法来");
+
+			const fullwidthInput = fullwidthLife.getFooterInput(makeMockCtx());
+			const cjkInput = cjkLife.getFooterInput(makeMockCtx());
+
+			expect(fullwidthInput.toksState.state).toBe("rate");
+			expect(cjkInput.toksState.state).toBe("rate");
+			expect((fullwidthInput.toksState as { value: number }).value)
+				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+		});
+
+		it("weighs Bopomofo (0x3100-0x312F) same as CJK ideographs", () => {
+			const { lifecycle: bopomofoLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			bopomofoLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 Bopomofo chars — if TOK_CJK_IDEO: 12×0.67=8.04, if TOK_OTHER: 12×0.5=6
+			bopomofoLife.onMessageUpdate("text_delta", "ㄅㄆㄇㄈㄉㄊㄋㄌㄍㄎㄏㄐ");
+
+			const { lifecycle: cjkLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			cjkLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 CJK ideograph chars — TOK_CJK_IDEO: 12×0.67=8.04
+			cjkLife.onMessageUpdate("text_delta", "你好世界测试中文输入法来");
+
+			const bopomofoInput = bopomofoLife.getFooterInput(makeMockCtx());
+			const cjkInput = cjkLife.getFooterInput(makeMockCtx());
+
+			expect(bopomofoInput.toksState.state).toBe("rate");
+			expect(cjkInput.toksState.state).toBe("rate");
+			expect((bopomofoInput.toksState as { value: number }).value)
+				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+		});
+
+		it("weighs Katakana Phonetic Extensions (0x31F0-0x31FF) same as CJK ideographs", () => {
+			const { lifecycle: katakanaExtLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			katakanaExtLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 Katakana Phonetic Extension chars — if TOK_CJK_IDEO: 12×0.67=8.04, if TOK_OTHER: 12×0.5=6
+			katakanaExtLife.onMessageUpdate("text_delta", "ㇰㇱㇲㇳㇴㇵㇶㇷㇸㇹㇺㇻ");
+
+			const { lifecycle: cjkLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			cjkLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 CJK ideograph chars — TOK_CJK_IDEO: 12×0.67=8.04
+			cjkLife.onMessageUpdate("text_delta", "你好世界测试中文输入法来");
+
+			const katakanaExtInput = katakanaExtLife.getFooterInput(makeMockCtx());
+			const cjkInput = cjkLife.getFooterInput(makeMockCtx());
+
+			expect(katakanaExtInput.toksState.state).toBe("rate");
+			expect(cjkInput.toksState.state).toBe("rate");
+			expect((katakanaExtInput.toksState as { value: number }).value)
+				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+		});
+
+		it("weighs CJK Radicals Supplement (0x2E80-0x2FDF) same as CJK ideographs", () => {
+			const { lifecycle: radicalsLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			radicalsLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 CJK Radicals Supplement chars — if TOK_CJK_IDEO: 12×0.67=8.04, if TOK_OTHER: 12×0.5=6
+			radicalsLife.onMessageUpdate("text_delta", "⺀⺁⺂⺃⺄⺅⺆⺇⺈⺉⺊⺋");
+
+			const { lifecycle: cjkLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			cjkLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 CJK ideograph chars — TOK_CJK_IDEO: 12×0.67=8.04
+			cjkLife.onMessageUpdate("text_delta", "你好世界测试中文输入法来");
+
+			const radicalsInput = radicalsLife.getFooterInput(makeMockCtx());
+			const cjkInput = cjkLife.getFooterInput(makeMockCtx());
+
+			expect(radicalsInput.toksState.state).toBe("rate");
+			expect(cjkInput.toksState.state).toBe("rate");
+			expect((radicalsInput.toksState as { value: number }).value)
+				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+		});
+
+		it("weighs Bopomofo boundary char U+312E same as CJK ideographs", () => {
+			const { lifecycle: bopomofoLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			bopomofoLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12x U+312E (last assigned Bopomofo char)
+			bopomofoLife.onMessageUpdate("text_delta", "ㄮㄮㄮㄮㄮㄮㄮㄮㄮㄮㄮㄮ");
+
+			const { lifecycle: cjkLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			cjkLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			cjkLife.onMessageUpdate("text_delta", "你好世界测试中文输入法来");
+
+			const bopomofoInput = bopomofoLife.getFooterInput(makeMockCtx());
+			const cjkInput = cjkLife.getFooterInput(makeMockCtx());
+
+			expect(bopomofoInput.toksState.state).toBe("rate");
+			expect(cjkInput.toksState.state).toBe("rate");
+			expect((bopomofoInput.toksState as { value: number }).value)
+				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+		});
+
+		it("weighs fullwidth currency symbols (¥₩) lower than CJK ideographs", () => {
+			// Fullwidth Yen Sign U+FFE5 — currency symbol, not ideograph
+			const { lifecycle: currencyLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			currencyLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			currencyLife.onMessageUpdate("text_delta", "￥￥￥￥￥￥￥￥￥￥￥￥"); // 12x U+FFE5
+
+			const { lifecycle: cjkLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			cjkLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			cjkLife.onMessageUpdate("text_delta", "你好世界测试中文输入法来"); // 12 CJK ideographs
+
+			const currencyInput = currencyLife.getFooterInput(makeMockCtx());
+			const cjkInput = cjkLife.getFooterInput(makeMockCtx());
+
+			expect(currencyInput.toksState.state).toBe("rate");
+			expect(cjkInput.toksState.state).toBe("rate");
+			// Currency symbols should weigh LESS than CJK ideographs
+			expect((currencyInput.toksState as { value: number }).value)
+				.toBeLessThan((cjkInput.toksState as { value: number }).value);
+		});
+
+		it("weighs Halfwidth Katakana (0xFF65-0xFF9F) same as CJK ideographs", () => {
+			const { lifecycle: halfwidthKataLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			halfwidthKataLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			// 12 halfwidth katakana chars (U+FF66-FF71)
+			halfwidthKataLife.onMessageUpdate("text_delta", "ｦｧｨｩｪｫｬｭｮｯｱｲ");
+
+			const { lifecycle: cjkLife } = createLifecycle();
+			vi.setSystemTime(1000);
+			cjkLife.onMessageStart("assistant");
+			vi.setSystemTime(2000);
+			cjkLife.onMessageUpdate("text_delta", "你好世界测试中文输入法来");
+
+			const halfwidthKataInput = halfwidthKataLife.getFooterInput(makeMockCtx());
+			const cjkInput = cjkLife.getFooterInput(makeMockCtx());
+
+			expect(halfwidthKataInput.toksState.state).toBe("rate");
+			expect(cjkInput.toksState.state).toBe("rate");
+			expect((halfwidthKataInput.toksState as { value: number }).value)
+				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+		});
+
 		// ── Finding 2: Dirty flag batching ─────────────────────
 
 		it("batches displayState updates across rapid deltas (dirty flag)", () => {
