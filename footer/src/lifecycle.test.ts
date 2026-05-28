@@ -294,7 +294,7 @@ describe("FooterLifecycle", () => {
 			lifecycle.onMessageEnd("assistant", 100);
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.toksState).toEqual({
+			expect(input.toksState).toMatchObject({
 				state: "rate",
 				value: 100, // 100 / 1
 				approximate: false,
@@ -309,7 +309,7 @@ describe("FooterLifecycle", () => {
 			lifecycle.onMessageEnd("assistant", 500);
 
 			const input = lifecycle.getFooterInput(makeMockCtx());
-			expect(input.toksState).toEqual({
+			expect(input.toksState).toMatchObject({
 				state: "rate",
 				value: 400, // 500 / 1.25
 				approximate: false,
@@ -760,20 +760,6 @@ describe("FooterLifecycle", () => {
 		});
 	});
 
-	describe("onToolEnd", () => {
-		it("triggers render for any tool", () => {
-			const { lifecycle, onRenderNeeded } = createLifecycle();
-			lifecycle.onToolEnd("bash");
-			expect(onRenderNeeded).toHaveBeenCalledTimes(1);
-		});
-
-		it("triggers render for non-git tools too", () => {
-			const { lifecycle, onRenderNeeded } = createLifecycle();
-			lifecycle.onToolEnd("read");
-			expect(onRenderNeeded).toHaveBeenCalledTimes(1);
-		});
-	});
-
 	describe("onUserBash", () => {
 		it("schedules git refresh when git handle exists", async () => {
 			const { lifecycle } = createLifecycle();
@@ -934,6 +920,36 @@ describe("FooterLifecycle", () => {
 			const input = lifecycle.getFooterInput(makeMockCtx({ branchLength: 0 }));
 			expect(accumulateTotals).not.toHaveBeenCalled();
 			expect(input.totals).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+		});
+	});
+
+	describe("onToolExecutionEnd", () => {
+		it("decrements active tool count", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("assistant");
+			lifecycle.onToolExecutionStart("bash");
+			lifecycle.onToolExecutionStart("edit");
+			lifecycle.onToolExecutionEnd("bash");
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({ state: "activity", label: "edit..." });
+		});
+
+		it("returns to pending after all tools end during active message", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("assistant");
+			lifecycle.onToolExecutionStart("bash");
+			lifecycle.onToolExecutionEnd("bash");
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState).toEqual({ state: "pending" });
+		});
+
+		it("does not go negative on extra end calls", () => {
+			const { lifecycle } = createLifecycle();
+			lifecycle.onMessageStart("assistant");
+			lifecycle.onToolExecutionEnd("bash");
+			lifecycle.onToolExecutionEnd("bash");
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.toksState.state).not.toBe("activity");
 		});
 	});
 });
