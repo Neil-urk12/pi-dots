@@ -1,6 +1,7 @@
 import type { ColorFn, HeaderInput, Theme } from "./types.js";
+import { renderAsciiLib } from "./ascii-lib.js";
 
-// ── Figlet Standard font for "Sci-pi" ───────────────────────────
+// ── Pre-rendered ASCII art (special cases) ────────────────────
 
 const ASCII_ART: Record<string, string[]> = {
 	"Sci-pi": [
@@ -10,6 +11,14 @@ const ASCII_ART: Record<string, string[]> = {
 		"  ___) | (__| |_____| |_) | |",
 		" |____/ \\___|_|     | .__/|_|",
 		"                    |_|      ",
+	],
+	"Agent-Pi": [
+		"              _                     _     _         ",
+		"     /\\      | |_ ___  _ __   ___| |__ (_)_ __    ",
+		"    /  \_____| __/ _ \| '_ \ / __| '_ \| | '_ \   ",
+		"   / /\ \____| || (_) | | | | (__| | | | | |_) |  ",
+		"  / ____ \___ \__\___/|_| |_|\___|_| |_|_| .__/   ",
+		" /_/    \_\___/                          |_|       ",
 	],
 };
 
@@ -45,7 +54,7 @@ export function renderHeader(input: HeaderInput, theme: Theme, width: number): s
 // ── Private helpers ──────────────────────────────────────────────
 
 function getAsciiArt(name: string): string[] {
-	return ASCII_ART[name] ?? ASCII_ART["Sci-pi"];
+	return ASCII_ART[name] ?? renderAsciiLib(name);
 }
 
 function buildSubtitle(input: HeaderInput, cf: ColorFn): string {

@@ -26,7 +26,7 @@ export type ConfigLoadResult = {
 
 export const defaultConfig: ResolvedConfig = {
 	enabled: true,
-	name: "Sci-pi",
+	name: "Agent-Pi",
 	showGit: true,
 	showModel: true,
 	showDirectory: true,

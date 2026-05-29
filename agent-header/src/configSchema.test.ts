@@ -16,7 +16,7 @@ describe("configSchema", () => {
 
 		it("falls back to default name for empty string", () => {
 			const result = resolveConfigWithWarnings({ name: "" });
-			expect(result.config.name).toBe("Sci-pi");
+			expect(result.config.name).toBe("Agent-Pi");
 		});
 
 		it("merges partial colors", () => {

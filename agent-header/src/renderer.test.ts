@@ -77,19 +77,20 @@ describe("renderer", () => {
 		expect(mockTheme.fg).toHaveBeenCalled();
 	});
 
-	it("falls back to Sci-pi art for unknown name", () => {
-		const input: HeaderInput = { ...baseInput, name: "nonexistent" };
+	it("renders dynamic ASCII lib art for unknown name", () => {
+		const input: HeaderInput = { ...baseInput, name: "my-app" };
 		const result = renderHeader(input, mockTheme, 80);
-		const artText = result.join("\n");
-		expect(artText).toContain("____");
-		expect(artText).toContain("/ ___|");
+		const artLines = result.slice(1, 11);
+		const artText = artLines.join("\n");
+		expect(artLines.some((line) => /\S/.test(line))).toBe(true);
+		expect(artText).not.toContain("  ____       _"); // Not Sci-pi art
 	});
 
-	it("handles empty name gracefully", () => {
+	it("handles empty name with blank ASCII lib output", () => {
 		const input: HeaderInput = { ...baseInput, name: "" };
 		const result = renderHeader(input, mockTheme, 80);
-		const artText = result.join("\n");
-		expect(artText).toContain("____");
+		// Empty name renders blank dynamic ASCII art lines
+		expect(result.length).toBeGreaterThanOrEqual(9);
 	});
 
 	it("handles width 0 without crashing", () => {
