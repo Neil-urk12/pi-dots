@@ -13,12 +13,15 @@ const ASCII_ART: Record<string, string[]> = {
 		"                    |_|      ",
 	],
 	"Agent-Pi": [
-		"              _                     _     _         ",
-		"     /\\      | |_ ___  _ __   ___| |__ (_)_ __    ",
-		"    /  \_____| __/ _ \| '_ \ / __| '_ \| | '_ \   ",
-		"   / /\ \____| || (_) | | | | (__| | | | | |_) |  ",
-		"  / ____ \___ \__\___/|_| |_|\___|_| |_|_| .__/   ",
-		" /_/    \_\___/                          |_|       ",
+		"      .o.                                            .o           ooooooooo.    o8o",
+		"     .888.                                         .o8           `888   `Y88.  `\"'",
+		"    .8\"888.      .oooooooo  .ooooo.  ooo. .oo.   .o888oo          888   .d88' oooo",
+		"   .8' `888.    888' `88b  d88' `88b `888P\"Y88b    888            888ooo88P'  `888",
+		"  .88ooo8888.   888   888  888ooo888  888   888    888   8888888  888          888",
+		" .8'     `888.  `88bod8P'  888    .o  888   888    888 .          888          888",
+		"o88o     o8888o `8oooooo.  `Y8bod8P' o888o o888o   \"888\"         o888o        o888o",
+		"                d\"     YD",
+		"                \"Y88888P'"
 	],
 };
 
@@ -29,13 +32,15 @@ export function renderHeader(input: HeaderInput, theme: Theme, width: number): s
 	const cf: ColorFn = (colorName, text) => theme.fg(colorName as never, text);
 
 	const art = getAsciiArt(input.name);
-	const subtitle = buildSubtitle(input, cf);
+	const subtitle = input.name === "Agent-Pi" ? "" : buildSubtitle(input, cf);
 
 	const result: string[] = [""];
 
-	// Render ASCII art lines
+	// Render ASCII art lines as single centered block
+	const artWidth = Math.max(0, ...art.map((line) => line.length));
+	const artPadding = " ".repeat(Math.max(0, Math.floor((width - artWidth) / 2)));
 	for (const line of art) {
-		result.push(centerLine(cf(input.config.colors.title, line), width));
+		result.push(artPadding + cf(input.config.colors.title, line));
 	}
 
 	// Empty line between art and subtitle

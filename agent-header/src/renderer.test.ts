@@ -86,11 +86,30 @@ describe("renderer", () => {
 		expect(artText).not.toContain("  ____       _"); // Not Sci-pi art
 	});
 
+	it("Agent-Pi art matches asciilib target", () => {
+		const input: HeaderInput = { ...baseInput, name: "Agent-Pi" };
+		const result = renderHeader(input, mockTheme, 0);
+		expect(result.slice(1, 10)).toEqual([
+			"      .o.                                            .o           ooooooooo.    o8o",
+			"     .888.                                         .o8           `888   `Y88.  `\"'",
+			"    .8\"888.      .oooooooo  .ooooo.  ooo. .oo.   .o888oo          888   .d88' oooo",
+			"   .8' `888.    888' `88b  d88' `88b `888P\"Y88b    888            888ooo88P'  `888",
+			"  .88ooo8888.   888   888  888ooo888  888   888    888   8888888  888          888",
+			" .8'     `888.  `88bod8P'  888    .o  888   888    888 .          888          888",
+			"o88o     o8888o `8oooooo.  `Y8bod8P' o888o o888o   \"888\"         o888o        o888o",
+			"                d\"     YD",
+			"                \"Y88888P'",
+		]);
+		expect(result.join("\n")).not.toContain("claude-sonnet-4");
+	});
+
 	it("handles empty name with blank ASCII lib output", () => {
 		const input: HeaderInput = { ...baseInput, name: "" };
 		const result = renderHeader(input, mockTheme, 80);
 		// Empty name renders blank dynamic ASCII art lines
 		expect(result.length).toBeGreaterThanOrEqual(9);
+		const artLines = result.slice(1, 11);
+		expect(artLines.every((line) => line.trim() === "")).toBe(true);
 	});
 
 	it("handles width 0 without crashing", () => {

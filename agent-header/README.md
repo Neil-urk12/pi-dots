@@ -60,7 +60,7 @@ Create `~/.pi/agent/pi-header.json` (global) or `.pi/pi-header.json` (project):
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `enabled` | boolean | `true` | Enable/disable header |
-| `name` | string | `"Sci-pi"` | ASCII art name |
+| `name` | string | `"Sci-pi"` | ASCII art name (dynamic asciilib rendering for custom names) |
 | `showGit` | boolean | `true` | Show git branch in subtitle |
 | `showModel` | boolean | `true` | Show model ID in subtitle |
 | `showDirectory` | boolean | `true` | Show directory in subtitle |
@@ -71,6 +71,18 @@ Create `~/.pi/agent/pi-header.json` (global) or `.pi/pi-header.json` (project):
 ### Color Values
 
 Use theme color names: `accent`, `muted`, `dim`, `success`, `warning`, `error`, `border`, `text`, etc.
+
+### Custom Names
+
+Set `name` to any string. "Sci-pi" uses pre-rendered art; all other names generate dynamic asciilib output:
+
+```json
+{
+  "name": "my-project"
+}
+```
+
+Supported characters: A-Z, a-z, 0-9, space. Unknown characters render as spaces.
 
 ## Development
 
