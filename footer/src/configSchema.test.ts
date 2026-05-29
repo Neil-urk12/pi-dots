@@ -119,4 +119,30 @@ describe("footer config presets", () => {
 		expect(result.config.layouts).toEqual(defaultFooterLayouts);
 		expect(result.warnings).toEqual([]);
 	});
+
+});
+
+describe("deprecation warnings", () => {
+	it("warns when deprecated showCache is set", () => {
+		const result = resolveConfigWithWarnings({ showCache: true });
+
+		expect(result.warnings).toEqual(
+			expect.arrayContaining([expect.stringContaining("showCache")]),
+		);
+	});
+
+	it("forwards showCache value to showCacheRead when showCacheRead is not explicitly set", () => {
+		const result = resolveConfigWithWarnings({ showCache: false });
+
+		expect(result.config.showCacheRead).toBe(false);
+	});
+
+	it("does not forward showCache when showCacheRead is explicitly set", () => {
+		const result = resolveConfigWithWarnings({
+			showCache: false,
+			showCacheRead: true,
+		});
+
+		expect(result.config.showCacheRead).toBe(true);
+	});
 });
