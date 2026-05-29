@@ -685,23 +685,23 @@ describe("FooterLifecycle", () => {
 				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
 		});
 
-		// ── Finding 2: Dirty flag batching ─────────────────────
+		// ── Rate computation across rapid deltas ─────────────────
 
-		it("batches displayState updates across rapid deltas (dirty flag)", () => {
+		it("computes rate correctly across rapid deltas", () => {
 			const { lifecycle } = createLifecycle();
 			vi.setSystemTime(1000);
 			lifecycle.onMessageStart("assistant");
 
 			// Send 20 rapid deltas at the same timestamp.
-			// With a dirty flag, displayState should only be recomputed once
-			// (on first delta that sets dirty), not on every delta.
+			// Display state should be consistent regardless of delta frequency.
+			// Each delta is a single character update.
 			vi.setSystemTime(1500);
 			for (let i = 0; i < 20; i++) {
 				lifecycle.onMessageUpdate("text_delta", "x");
 			}
 
-			// Read displayState — after a dirty-flag fix, the state object
-			// should reflect the *last* computed value only after dirty is cleared.
+			// Read displayState — the rate should reflect all accumulated
+			// tokens across the entire rapid-delta burst.
 			// We verify that the final rate is based on all 20 tokens (5 per delta)
 			// accumulated, not some intermediate snapshot.
 			const input = lifecycle.getFooterInput(makeMockCtx());
@@ -712,24 +712,18 @@ describe("FooterLifecycle", () => {
 			expect(rate).toBeGreaterThan(0);
 		});
 
-		it("fires onRenderNeeded exactly once after rapid throttle window", () => {
+		it("fires onRenderNeeded on each delta (no throttle)", () => {
 			const { lifecycle, onRenderNeeded } = createLifecycle();
 			lifecycle.onMessageStart("assistant"); // calls onRenderNeeded once
 			onRenderNeeded.mockClear();
 
-			// Send 15 rapid text deltas — sets toksDirty, arms 250ms throttle timer
+			// Send 15 rapid text deltas — each should trigger render immediately
 			for (let i = 0; i < 15; i++) {
 				lifecycle.onMessageUpdate("text_delta", "a");
 			}
 
-			// onRenderNeeded should NOT be called yet (throttled)
-			expect(onRenderNeeded).not.toHaveBeenCalled();
-
-			// Advance past the 250ms throttle window
-			vi.advanceTimersByTime(250);
-
-			// Should fire exactly once (all 15 deltas coalesced)
-			expect(onRenderNeeded).toHaveBeenCalledTimes(1);
+			// onRenderNeeded should be called once per delta
+			expect(onRenderNeeded).toHaveBeenCalledTimes(15);
 		});
 
 		it("returns stable toksState reference between reads", () => {
@@ -743,7 +737,7 @@ describe("FooterLifecycle", () => {
 			const before = lifecycle.getFooterInput(makeMockCtx()).toksState;
 
 			// Call getFooterInput again without any new deltas.
-			// With dirty flag, no new state object should be created.
+			// Cache hit — no new state object should be created.
 			const after = lifecycle.getFooterInput(makeMockCtx());
 
 			// The displayState should be referentially identical (no unnecessary alloc)

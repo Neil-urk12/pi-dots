@@ -82,8 +82,6 @@ export class FooterLifecycle {
 	#cachedTotals: Totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	#cachedBranchLength: number = 0;
 	#toksSample: ToksSample | undefined = undefined;
-	#toksThrottleTimer: ReturnType<typeof setTimeout> | undefined = undefined;
-	#toksDirty: boolean = false;
 	#activeToolCount: number = 0;
 	#latestToolLabel: string = "";
 	#activityDotIndex: number = 0;
@@ -186,32 +184,24 @@ shutdown(): void {
 		this.#onRenderNeeded();
 	}
 
-	onMessageUpdate(eventType: string, delta?: string): void {
+	onMessageUpdate(eventType: string, delta?: string, outputTokens?: number): void {
 		if (!this.#toksSample || !delta) return;
 		if (eventType !== "text_delta" && eventType !== "thinking_delta" && eventType !== "toolcall_delta") return;
 
 		this.#toksSample.estimatedTokens += estimateTokens(delta);
 		this.#toksSample.hasObservedOutput = true;
-		this.#toksDirty = true;
 
 		const elapsed = (Date.now() - this.#toksSample.startTime) / 1000;
 		if (elapsed > 0) {
+			const currentTokens = (outputTokens && outputTokens > 0) ? outputTokens : this.#toksSample.estimatedTokens;
 			this.#toksSample.displayState = {
 				state: "rate",
-				value: this.#toksSample.estimatedTokens / elapsed,
-				approximate: true,
+				value: currentTokens / elapsed,
+				approximate: !(outputTokens && outputTokens > 0),
 			};
 		}
 
-		if (!this.#toksThrottleTimer) {
-			this.#toksThrottleTimer = setTimeout(() => {
-				this.#toksThrottleTimer = undefined;
-				if (this.#toksDirty) {
-					this.#toksDirty = false;
-					this.#onRenderNeeded();
-				}
-			}, 250);
-		}
+		this.#onRenderNeeded();
 	}
 
 	onMessageEnd(role: string, outputTokens?: number): void {
@@ -238,7 +228,6 @@ shutdown(): void {
 					this.#toksSample = undefined;
 				}
 			}
-			this.#clearToksThrottle();
 			this.#onRenderNeeded();
 		}
 	}
@@ -262,23 +251,14 @@ shutdown(): void {
 				this.#toksSample = undefined;
 			}
 		}
-		this.#clearToksThrottle();
 		this.#onRenderNeeded();
 	}
 
-	#clearToksThrottle(): void {
-		if (this.#toksThrottleTimer) {
-			clearTimeout(this.#toksThrottleTimer);
-			this.#toksThrottleTimer = undefined;
-			this.#toksDirty = false;
-		}
-	}
 
 	#resetState(): void {
 		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 		this.#cachedBranchLength = 0;
 		this.#toksSample = undefined;
-		this.#clearToksThrottle();
 		this.#activeToolCount = 0;
 		this.#latestToolLabel = "";
 		this.#activityDotIndex = 0;
