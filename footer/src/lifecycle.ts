@@ -11,6 +11,7 @@ import { normalizeToolLabel } from "./tokLabels.js";
 // ── CJK-aware token estimation ────────────────────────────────
 
 // Estimated tokens per character for different script families.
+// Values derived from tiktoken cl100k_base empirical ratios.
 const TOK_ASCII = 0.25; // ASCII printable (0x20-0x7E)
 const TOK_CJK_IDEO = 0.67; // CJK ideographs, kana, hangul
 const TOK_CJK_PUNCT = 0.5; // CJK Symbols & Punctuation (0x3000-0x303f)

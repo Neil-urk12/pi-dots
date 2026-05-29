@@ -20,8 +20,8 @@ type SegmentMap = Record<FooterSegmentId, string | undefined>;
 
 function buildSegments(input: FooterInput, cf: ColorFn): SegmentMap {
 	const cfg = input.config;
-	const showCacheRead = cfg.showCache && cfg.showCacheRead;
-	const showCacheWrites = cfg.showCache && cfg.showCacheWrites;
+	const showCacheRead = cfg.showCacheRead;
+	const showCacheWrites = cfg.showCacheWrites;
 
 	return {
 		model: formatModelSegment(input, cf),

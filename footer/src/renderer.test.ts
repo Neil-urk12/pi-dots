@@ -156,9 +156,9 @@ describe("renderFooter", () => {
 		expect(line).not.toContain("↑");
 	});
 
-	it("excludes cache from full tokens when showCache is false", () => {
+	it("excludes cache from full tokens when showCacheRead and showCacheWrites are false", () => {
 		const input = makeInput({
-			configOverrides: { showCache: false },
+			configOverrides: { showCacheRead: false, showCacheWrites: false },
 		});
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).not.toContain("↯");

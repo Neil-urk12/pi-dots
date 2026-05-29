@@ -35,7 +35,8 @@ export type CleanFooterConfig = {
 	enabled?: boolean;
 	showGit?: boolean;
 	showTokens?: boolean;
-	showCache?: boolean; // deprecated: use showCacheRead
+	/** @deprecated Use showCacheRead and showCacheWrites instead */
+	showCache?: boolean;
 	showCacheRead?: boolean;
 	showCacheWrites?: boolean;
 	showContext?: boolean;
@@ -179,7 +180,6 @@ export const defaultConfig: ResolvedConfig = {
 	enabled: true,
 	showGit: true,
 	showTokens: true,
-	showCache: true /* deprecated: showCacheRead */,
 	showCacheRead: true,
 	showCacheWrites: false,
 	showContext: true,
@@ -230,6 +230,15 @@ export function resolveConfig(config: CleanFooterConfig): ResolvedConfig {
 
 export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoadResult {
 	const warnings: string[] = [];
+	if ("showCache" in config) {
+		warnings.push(
+			"showCache is deprecated; use showCacheRead and showCacheWrites instead",
+		);
+	}
+	// Forward deprecated showCache to showCacheRead unless showCacheRead was also set
+	if ("showCache" in config && !("showCacheRead" in config)) {
+		config = { ...config, showCacheRead: config.showCache };
+	}
 	const preset = resolvePresetId(config.preset, warnings);
 	const presetConfig = footerPresetConfigs[preset];
 	const effectiveConfig = mergeConfig(presetConfig, config);
