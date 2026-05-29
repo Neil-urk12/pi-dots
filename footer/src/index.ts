@@ -4,13 +4,10 @@ import os from "node:os";
 
 import { FooterLifecycle } from "./lifecycle.js";
 import { renderFooter } from "./renderer.js";
+import { extractOutputTokens } from "./usage.js";
 
 export type { ColorFn, FooterInput, Totals, Theme } from "./types.js";
 
-interface MessageUsage {
-	output?: number;
-	input?: number;
-}
 
 export default function (pi: ExtensionAPI) {
 	const globalConfigPath = path.join(os.homedir(), ".pi", "agent", "clean-footer.json");
@@ -94,12 +91,9 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.on("message_end", (event) => {
 		const agentMsg = event.message;
-		let outputTokens: number | undefined;
-		if (agentMsg.role === "assistant") {
-			const msg = agentMsg as unknown as { usage?: MessageUsage; message?: { usage?: MessageUsage } };
-			const usage = msg.usage ?? msg.message?.usage;
-			outputTokens = usage?.output;
-		}
+		const outputTokens = agentMsg.role === "assistant"
+			? extractOutputTokens(agentMsg)
+			: undefined;
 		lifecycle.onMessageEnd(agentMsg.role, outputTokens);
 	});
 
@@ -107,7 +101,8 @@ export default function (pi: ExtensionAPI) {
 		const streamEvent = event.assistantMessageEvent;
 		if (event.message.role === "assistant") {
 			const delta = "delta" in streamEvent ? streamEvent.delta : undefined;
-			lifecycle.onMessageUpdate(streamEvent.type, delta);
+			const outputTokens = extractOutputTokens(event.message);
+			lifecycle.onMessageUpdate(streamEvent.type, delta, outputTokens);
 		}
 	});
 
