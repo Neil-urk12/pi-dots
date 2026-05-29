@@ -109,7 +109,7 @@ describe("HeaderLifecycle", () => {
 		await lifecycle.start(ctx);
 
 		const input = lifecycle.getInput(ctx);
-		expect(input.name).toBe("Sci-pi");
+		expect(input.name).toBe("Agent-Pi");
 		expect(input).not.toHaveProperty("version");
 		expect(input.directory).toBe("test-project");
 		expect(input.config).toBeDefined();
