@@ -13,14 +13,6 @@ const ASCII_ART: Record<string, string[]> = {
 	],
 };
 
-const FALLBACK_ART: string[] = [
-	"  ____       _             _ ",
-	" / ___|  ___(_)      _ __ (_)",
-	" \\___ \\ / __| |_____| '_ \\| |",
-	"  ___) | (__| |_____| |_) | |",
-	" |____/ \\___|_|     | .__/|_|",
-	"                    |_|      ",
-];
 
 // ── Public interface ─────────────────────────────────────────────
 
@@ -53,14 +45,12 @@ export function renderHeader(input: HeaderInput, theme: Theme, width: number): s
 // ── Private helpers ──────────────────────────────────────────────
 
 function getAsciiArt(name: string): string[] {
-	return ASCII_ART[name] ?? FALLBACK_ART;
+	return ASCII_ART[name] ?? ASCII_ART["Sci-pi"];
 }
 
 function buildSubtitle(input: HeaderInput, cf: ColorFn): string {
 	const parts: string[] = [];
 
-	// Version
-	parts.push(`v${input.version}`);
 
 	// Git branch
 	if (input.gitBranch) {

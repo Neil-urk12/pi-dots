@@ -12,7 +12,7 @@ export function loadHeaderConfig(globalPath: string, projectPath: string): Confi
 export function loadConfig(paths: string[]): ConfigLoadResult {
 	const loaded: string[] = [];
 	let merged: HeaderConfig = {};
-	let error: string | undefined;
+	const errors: string[] = [];
 
 	for (const configPath of paths) {
 		if (!existsSync(configPath)) continue;
@@ -21,7 +21,7 @@ export function loadConfig(paths: string[]): ConfigLoadResult {
 			merged = mergeConfig(merged, parsed);
 			loaded.push(configPath);
 		} catch (err) {
-			error = `${configPath}: ${err instanceof Error ? err.message : String(err)}`;
+			errors.push(`${configPath}: ${err instanceof Error ? err.message : String(err)}`);
 		}
 	}
 
@@ -30,6 +30,6 @@ export function loadConfig(paths: string[]): ConfigLoadResult {
 		config: resolved.config,
 		loadedPaths: loaded,
 		warnings: resolved.warnings,
-		error,
+		error: errors.length > 0 ? errors.join("; ") : undefined,
 	};
 }
