@@ -44,7 +44,7 @@ export class HeaderLifecycle {
 
 		if (this.#enabled) {
 			this.#createGit(ctx.cwd);
-			await this.#git!.refresh();
+			await this.#git?.refresh();
 		}
 	}
 
@@ -96,7 +96,7 @@ export class HeaderLifecycle {
 
 		if (this.#enabled) {
 			this.#createGit(this.#cwd);
-			await this.#git!.refresh();
+			await this.#git?.refresh();
 		}
 
 		this.#onRenderNeeded();
@@ -109,7 +109,7 @@ export class HeaderLifecycle {
 			this.#git = undefined;
 		} else {
 			this.#createGit(this.#cwd);
-			await this.#git!.refresh();
+			await this.#git?.refresh();
 		}
 		this.#onRenderNeeded();
 		return this.#enabled;
@@ -120,7 +120,6 @@ export class HeaderLifecycle {
 	getInput(ctx: ExtensionContext): HeaderInput {
 		return {
 			name: this.#config.name,
-			version: getVersion(),
 			gitBranch: this.#config.showGit ? this.#git?.state.branch : undefined,
 			modelId: this.#config.showModel ? (ctx.model?.id ?? "no-model") : "",
 			directory: this.#config.showDirectory ? path.basename(ctx.cwd) : "",
@@ -151,15 +150,3 @@ export class HeaderLifecycle {
 	}
 }
 
-function getVersion(): string {
-	try {
-		// Try to read version from package.json relative to this file
-		const { readFileSync } = require("node:fs");
-		const { join } = require("node:path");
-		const pkgPath = join(__dirname, "..", "package.json");
-		const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
-		return pkg.version ?? "dev";
-	} catch {
-		return "dev";
-	}
-}

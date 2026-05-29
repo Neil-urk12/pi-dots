@@ -7,7 +7,6 @@ export type ColorFn = (colorName: string, text: string) => string;
 /** Snapshot assembled by the lifecycle and fed to the renderer. */
 export type HeaderInput = {
 	name: string;
-	version: string;
 	gitBranch?: string;
 	modelId: string;
 	directory: string;

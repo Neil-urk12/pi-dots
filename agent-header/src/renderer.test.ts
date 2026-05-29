@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { renderHeader } from "./renderer.js";
 import type { HeaderInput, Theme } from "./types.js";
 import { defaultConfig } from "./configSchema.js";
@@ -9,10 +9,12 @@ const mockTheme: Theme = {
 	bold: vi.fn((text: string) => text),
 } as unknown as Theme;
 
+beforeEach(() => {
+	vi.clearAllMocks();
+});
 describe("renderer", () => {
 	const baseInput: HeaderInput = {
 		name: "Sci-pi",
-		version: "0.1.0",
 		modelId: "claude-sonnet-4",
 		directory: "my-project",
 		config: defaultConfig,
@@ -37,11 +39,6 @@ describe("renderer", () => {
 		expect(firstArtLine.startsWith(" ")).toBe(true);
 	});
 
-	it("includes version in subtitle", () => {
-		const result = renderHeader(baseInput, mockTheme, 80);
-		const subtitleLine = result[result.length - 2]; // Before final empty line
-		expect(subtitleLine).toContain("v0.1.0");
-	});
 
 	it("includes git branch when provided", () => {
 		const input = { ...baseInput, gitBranch: "main" };
@@ -78,5 +75,38 @@ describe("renderer", () => {
 	it("uses theme.fg for colors", () => {
 		renderHeader(baseInput, mockTheme, 80);
 		expect(mockTheme.fg).toHaveBeenCalled();
+	});
+
+	it("falls back to Sci-pi art for unknown name", () => {
+		const input: HeaderInput = { ...baseInput, name: "nonexistent" };
+		const result = renderHeader(input, mockTheme, 80);
+		const artText = result.join("\n");
+		expect(artText).toContain("____");
+		expect(artText).toContain("/ ___|");
+	});
+
+	it("handles empty name gracefully", () => {
+		const input: HeaderInput = { ...baseInput, name: "" };
+		const result = renderHeader(input, mockTheme, 80);
+		const artText = result.join("\n");
+		expect(artText).toContain("____");
+	});
+
+	it("handles width 0 without crashing", () => {
+		const result = renderHeader(baseInput, mockTheme, 0);
+		expect(Array.isArray(result)).toBe(true);
+	});
+
+	it("handles empty modelId", () => {
+		const input: HeaderInput = { ...baseInput, modelId: "" };
+		const result = renderHeader(input, mockTheme, 80);
+		expect(result.join("\n")).not.toContain("claude-sonnet-4");
+	});
+
+	it("subtitle does not contain version string", () => {
+		const result = renderHeader(baseInput, mockTheme, 80);
+		const subtitleLine = result[result.length - 2];
+		// Version is dead code in the rendering path — should never appear in subtitle
+		expect(subtitleLine).not.toMatch(/\d+\.\d+\.\d+/);
 	});
 });
