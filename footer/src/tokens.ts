@@ -27,3 +27,27 @@ export function accumulateTotals(
 
 	return totals;
 }
+
+/**
+ * Accumulate total session cost from assistant messages.
+ * Returns 0 when no cost data is available (e.g. local/zero-cost models).
+ */
+export function accumulateCost(
+	branch: readonly {
+		type: string;
+		message?: { role: string };
+	}[],
+): number {
+	let cost = 0;
+
+	for (const entry of branch) {
+		if (entry.type !== "message" || entry.message?.role !== "assistant") continue;
+		const msg = entry.message as AssistantMessage;
+		const total = msg.usage?.cost?.total;
+		if (typeof total === "number" && Number.isFinite(total) && total > 0) {
+			cost += total;
+		}
+	}
+
+	return cost;
+}

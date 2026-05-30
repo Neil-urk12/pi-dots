@@ -43,6 +43,7 @@ function buildSegments(input: FooterInput, cf: ColorFn): SegmentMap {
 			? formatTotalOnlyTokens(input.totals, cf, cfg.colors.tokens)
 			: undefined,
 		toks: toksSegment(input, cf),
+		cost: costSegment(input, cf),
 	};
 }
 
@@ -91,6 +92,12 @@ function toksSegment(input: FooterInput, cf: ColorFn): string | undefined {
 	const rounded = Math.round(ts.value);
 	if (ts.approximate) return cf(input.config.colors.tokens, `≈${rounded} tok/s`);
 	return cf(input.config.colors.tokens, `${rounded} tok/s`);
+}
+
+function costSegment(input: FooterInput, cf: ColorFn): string | undefined {
+	if (!input.config.showCost) return undefined;
+	if (input.sessionCost <= 0) return undefined;
+	return cf(input.config.colors.cost, `$${input.sessionCost.toFixed(2)}`);
 }
 
 // ── Private: width-tier branching ──────────────────────────────

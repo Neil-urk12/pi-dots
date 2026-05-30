@@ -9,6 +9,7 @@ export const footerSegmentIds = [
 	"tokensNoCache",
 	"tokensTotal",
 	"toks",
+	"cost",
 ] as const;
 
 export type FooterSegmentId = (typeof footerSegmentIds)[number];
@@ -42,6 +43,7 @@ export type CleanFooterConfig = {
 	showContext?: boolean;
 	showDirectory?: boolean;
 	showEffort?: boolean;
+	showCost?: boolean;
 	separator?: string;
 	layouts?: FooterLayoutConfig[];
 	gitRefreshDebounceMs?: number;
@@ -68,6 +70,7 @@ export type ColorConfig = {
 	contextWarning: string;
 	contextDanger: string;
 	tokens: string;
+	cost: string;
 	separator: string;
 };
 
@@ -170,6 +173,7 @@ export const footerPresetConfigs: Record<FooterPresetId, CleanFooterConfig> = {
 			contextWarning: "warning",
 			contextDanger: "error",
 			tokens: "dim",
+			cost: "dim",
 			separator: "dim",
 		},
 	},
@@ -185,6 +189,7 @@ export const defaultConfig: ResolvedConfig = {
 	showContext: true,
 	showDirectory: true,
 	showEffort: true,
+	showCost: false,
 	separator: " | ",
 	layouts: defaultFooterLayouts,
 	gitRefreshDebounceMs: DEFAULT_GIT_REFRESH_DEBOUNCE_MS,
@@ -200,6 +205,7 @@ export const defaultConfig: ResolvedConfig = {
 		contextWarning: "warning",
 		contextDanger: "error",
 		tokens: "muted",
+		cost: "muted",
 		separator: "dim",
 	},
 };

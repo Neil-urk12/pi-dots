@@ -36,6 +36,16 @@ vi.mock("./tokens.js", () => {
 			cacheRead: 10,
 			cacheWrite: 5,
 		})),
+		accumulateCost: vi.fn(() => 0),
+	};
+});
+	return {
+		accumulateTotals: vi.fn(() => ({
+			input: 100,
+			output: 50,
+			cacheRead: 10,
+			cacheWrite: 5,
+		})),
 	};
 });
 
@@ -43,7 +53,7 @@ vi.mock("./tokens.js", () => {
 
 import { FooterLifecycle } from "./lifecycle.js";
 import { createGitState } from "./git.js";
-import { accumulateTotals } from "./tokens.js";
+import { accumulateTotals, accumulateCost } from "./tokens.js";
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -847,6 +857,14 @@ describe("FooterLifecycle", () => {
 				}),
 			);
 			expect(input.modelId).toBe("no-model");
+		});
+
+		it("includes sessionCost from accumulateCost", async () => {
+			const { lifecycle } = createLifecycle();
+			await lifecycle.start(makeMockCtx());
+
+			const input = lifecycle.getFooterInput(makeMockCtx());
+			expect(input.sessionCost).toBe(0); // mock accumulateCost returns no cost
 		});
 	});
 
