@@ -96,7 +96,7 @@ function toksSegment(input: FooterInput, cf: ColorFn): string | undefined {
 
 function costSegment(input: FooterInput, cf: ColorFn): string | undefined {
 	if (!input.config.showCost) return undefined;
-	if (input.sessionCost <= 0) return undefined;
+	if (input.sessionCost == null || input.sessionCost <= 0) return undefined;
 	return cf(input.config.colors.cost, `$${input.sessionCost.toFixed(2)}`);
 }
 

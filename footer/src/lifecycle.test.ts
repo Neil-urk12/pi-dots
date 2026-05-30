@@ -39,15 +39,6 @@ vi.mock("./tokens.js", () => {
 		accumulateCost: vi.fn(() => 0),
 	};
 });
-	return {
-		accumulateTotals: vi.fn(() => ({
-			input: 100,
-			output: 50,
-			cacheRead: 10,
-			cacheWrite: 5,
-		})),
-	};
-});
 
 // ── Imports (real — but git.js and tokens.js are already mocked) ──
 
@@ -58,9 +49,9 @@ import { accumulateTotals, accumulateCost } from "./tokens.js";
 // ── Helpers ────────────────────────────────────────────────────
 
 function makeMockCtx(
-	overrides?: Partial<ExtensionContext> & { branchLength?: number },
+	overrides?: Partial<ExtensionContext> & { entryCount?: number },
 ): ExtensionContext {
-	const { branchLength, ...rest } = overrides ?? {};
+	const { entryCount, ...rest } = overrides ?? {};
 	return {
 		cwd: "/home/user/projects/my-project",
 		hasUI: false,
@@ -70,8 +61,8 @@ function makeMockCtx(
 		} as ExtensionContext["model"],
 		getContextUsage: () => ({ tokens: 84_000 }),
 		sessionManager: {
-			getBranch: () =>
-				Array(branchLength ?? 0).fill({ type: "message", message: { role: "assistant" } }),
+			getEntries: () =>
+				Array(entryCount ?? 0).fill({ type: "message", message: { role: "assistant" } }),
 		} as unknown as ExtensionContext["sessionManager"],
 		ui: {} as ExtensionContext["ui"],
 		...rest,
@@ -866,6 +857,15 @@ describe("FooterLifecycle", () => {
 			const input = lifecycle.getFooterInput(makeMockCtx());
 			expect(input.sessionCost).toBe(0); // mock accumulateCost returns no cost
 		});
+
+		it("passes positive accumulateCost through getFooterInput", async () => {
+			vi.mocked(accumulateCost).mockReturnValue(1.23);
+			const { lifecycle } = createLifecycle();
+			await lifecycle.start(makeMockCtx());
+
+			const input = lifecycle.getFooterInput(makeMockCtx({ entryCount: 1 }));
+			expect(input.sessionCost).toBe(1.23);
+		});
 	});
 
 	// ── Token caching ────────────────────────────────────────
@@ -879,10 +879,10 @@ describe("FooterLifecycle", () => {
 
 		it("caches totals when branch length has not changed", async () => {
 			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx({ branchLength: 5 }));
+			await lifecycle.start(makeMockCtx({ entryCount: 5 }));
 
-			const first = lifecycle.getFooterInput(makeMockCtx({ branchLength: 5 }));
-			const second = lifecycle.getFooterInput(makeMockCtx({ branchLength: 5 }));
+			const first = lifecycle.getFooterInput(makeMockCtx({ entryCount: 5 }));
+			const second = lifecycle.getFooterInput(makeMockCtx({ entryCount: 5 }));
 
 			expect(accumulateTotals).toHaveBeenCalledTimes(1);
 			expect(first.totals).toEqual(expectedTotals);
@@ -891,10 +891,10 @@ describe("FooterLifecycle", () => {
 
 		it("recomputes totals when branch length changes", async () => {
 			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx({ branchLength: 5 }));
+			await lifecycle.start(makeMockCtx({ entryCount: 5 }));
 
-			lifecycle.getFooterInput(makeMockCtx({ branchLength: 5 }));
-			const second = lifecycle.getFooterInput(makeMockCtx({ branchLength: 8 }));
+			lifecycle.getFooterInput(makeMockCtx({ entryCount: 5 }));
+			const second = lifecycle.getFooterInput(makeMockCtx({ entryCount: 8 }));
 
 			expect(accumulateTotals).toHaveBeenCalledTimes(2);
 			expect(second.totals).toEqual(expectedTotals);
@@ -902,34 +902,34 @@ describe("FooterLifecycle", () => {
 
 		it("resets cache after reload", async () => {
 			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx({ branchLength: 5 }));
+			await lifecycle.start(makeMockCtx({ entryCount: 5 }));
 
-			lifecycle.getFooterInput(makeMockCtx({ branchLength: 5 }));
+			lifecycle.getFooterInput(makeMockCtx({ entryCount: 5 }));
 			expect(accumulateTotals).toHaveBeenCalledTimes(1);
 
-			await lifecycle.reload(makeMockCtx({ branchLength: 5 }));
-			lifecycle.getFooterInput(makeMockCtx({ branchLength: 5 }));
+			await lifecycle.reload(makeMockCtx({ entryCount: 5 }));
+			lifecycle.getFooterInput(makeMockCtx({ entryCount: 5 }));
 			expect(accumulateTotals).toHaveBeenCalledTimes(2);
 		});
 
 		it("resets cache after toggle", async () => {
 			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx({ branchLength: 5 }));
+			await lifecycle.start(makeMockCtx({ entryCount: 5 }));
 
-			lifecycle.getFooterInput(makeMockCtx({ branchLength: 5 }));
+			lifecycle.getFooterInput(makeMockCtx({ entryCount: 5 }));
 			expect(accumulateTotals).toHaveBeenCalledTimes(1);
 
 			await lifecycle.toggle(); // off
 			await lifecycle.toggle(); // back on
-			lifecycle.getFooterInput(makeMockCtx({ branchLength: 5 }));
+			lifecycle.getFooterInput(makeMockCtx({ entryCount: 5 }));
 			expect(accumulateTotals).toHaveBeenCalledTimes(2);
 		});
 
 		it("handles zero-length branch", async () => {
 			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx({ branchLength: 0 }));
+			await lifecycle.start(makeMockCtx({ entryCount: 0 }));
 
-			const input = lifecycle.getFooterInput(makeMockCtx({ branchLength: 0 }));
+			const input = lifecycle.getFooterInput(makeMockCtx({ entryCount: 0 }));
 			expect(accumulateTotals).not.toHaveBeenCalled();
 			expect(input.totals).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
 		});

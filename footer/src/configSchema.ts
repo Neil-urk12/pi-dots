@@ -85,22 +85,22 @@ export const defaultFooterLayouts: FooterLayoutConfig[] = [
 	{
 		minWidth: 100,
 		left: ["model", "directory", "git", "toks"],
-		right: ["context", "tokensFull"],
+		right: ["context", "tokensFull", "cost"],
 	},
 	{
 		minWidth: 80,
 		left: ["model", "directory", "git", "toks"],
-		right: ["context", "tokensNoCache"],
+		right: ["context", "tokensNoCache", "cost"],
 	},
 	{
 		minWidth: 60,
 		left: ["model", "directory", "git", "toks"],
-		right: ["context", "tokensTotal"],
+		right: ["context", "tokensTotal", "cost"],
 	},
 	{
 		minWidth: 40,
 		left: ["model", "directory", "git"],
-		right: ["context"],
+		right: ["context", "cost"],
 	},
 	{
 		minWidth: 0,
@@ -189,7 +189,7 @@ export const defaultConfig: ResolvedConfig = {
 	showContext: true,
 	showDirectory: true,
 	showEffort: true,
-	showCost: false,
+	showCost: true,
 	separator: " | ",
 	layouts: defaultFooterLayouts,
 	gitRefreshDebounceMs: DEFAULT_GIT_REFRESH_DEBOUNCE_MS,
