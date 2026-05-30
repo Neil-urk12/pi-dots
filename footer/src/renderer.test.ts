@@ -257,6 +257,18 @@ describe("renderFooter", () => {
 		expect(line).not.toContain("$0.00");
 	});
 
+	it("hides cost when sessionCost is undefined", () => {
+		const input = makeInput({
+			sessionCost: undefined,
+			configOverrides: {
+				showCost: true,
+				layouts: [{ minWidth: 0, left: ["model"], right: ["context", "cost"] }],
+			},
+		});
+		const [line] = renderFooter(input, plainTheme, 200);
+		expect(line).not.toContain("$");
+	});
+
 	it("formats cost with 2 decimal places", () => {
 		const input = makeInput({
 			sessionCost: 0.5,
@@ -281,10 +293,10 @@ describe("renderFooter", () => {
 		expect(line).toContain("[muted:$2.50]");
 	});
 
-	it("cost segment is not in default layouts", () => {
+	it("cost segment shows by default in wide layouts", () => {
 		const input = makeInput({ sessionCost: 1.23 });
 		const [line] = renderFooter(input, plainTheme, 200);
-		expect(line).not.toContain("$1.23");
+		expect(line).toContain("$1.23");
 	});
 
 	it("hides cache read when showCacheRead is false", () => {
