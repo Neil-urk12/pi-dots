@@ -34,7 +34,7 @@ export type FooterInput = {
 	contextUsed: number;
 	contextMax?: number;
 	totals: Totals;
-	sessionCost: number;
+	sessionCost?: number;
 	toksState: ToksDisplayState;
 	config: ResolvedConfig;
 };

@@ -30,7 +30,7 @@ export class FooterLifecycle {
 	#onRenderNeeded: () => void;
 	#cachedTotals: Totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 	#cachedCost: number = 0;
-	#cachedBranchLength: number = 0;
+	#cachedEntriesLength: number = 0;
 
 	constructor(opts: LifecycleOptions) {
 		this.#globalConfigPath = opts.globalConfigPath;
@@ -51,7 +51,7 @@ export class FooterLifecycle {
 	async start(ctx: ExtensionContext): Promise<void> {
 		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 		this.#cachedCost = 0;
-		this.#cachedBranchLength = 0;
+		this.#cachedEntriesLength = 0;
 		this.#cwd = ctx.cwd;
 		this.#loadedConfig = loadFooterConfig(
 			this.#globalConfigPath,
@@ -181,11 +181,11 @@ async toggle(): Promise<boolean> {
 	// ── Query ──────────────────────────────────────────────────────
 
 	getFooterInput(ctx: ExtensionContext): FooterInput {
-		const branch = ctx.sessionManager.getBranch();
-		if (branch.length !== this.#cachedBranchLength) {
-			this.#cachedTotals = accumulateTotals(branch);
-			this.#cachedCost = accumulateCost(branch);
-			this.#cachedBranchLength = branch.length;
+		const entries = ctx.sessionManager.getEntries();
+		if (entries.length !== this.#cachedEntriesLength) {
+			this.#cachedTotals = accumulateTotals(entries);
+			this.#cachedCost = accumulateCost(entries);
+			this.#cachedEntriesLength = entries.length;
 		}
 		return {
 			modelId: ctx.model?.id ?? "no-model",
@@ -205,7 +205,7 @@ async toggle(): Promise<boolean> {
 	#resetState(): void {
 		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 		this.#cachedCost = 0;
-		this.#cachedBranchLength = 0;
+		this.#cachedEntriesLength = 0;
 		this.#toks.shutdown();
 	}
 
