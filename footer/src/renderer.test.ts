@@ -43,6 +43,7 @@ function makeInput(
 		contextUsed: 50_000,
 		contextMax: 200_000,
 		totals: { input: 1500, output: 500, cacheRead: 200, cacheWrite: 100 },
+		sessionCost: 0,
 		toksState: { state: "hidden" },
 		config: configOverrides ? { ...defaultConfig, ...configOverrides } : defaultConfig,
 		...rest,
@@ -219,6 +220,71 @@ describe("renderFooter", () => {
 		const input = makeInput({ toksState: { state: "rate", value: 150, approximate: false } });
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain("150 tok/s");
+	});
+
+	// ── Cost segment ──────────────────────────────────────────
+
+	it("shows cost when showCost is true and sessionCost > 0", () => {
+		const input = makeInput({
+			sessionCost: 1.23,
+			configOverrides: {
+				showCost: true,
+				layouts: [{ minWidth: 0, left: ["model"], right: ["context", "cost"] }],
+			},
+		});
+		const [line] = renderFooter(input, plainTheme, 200);
+		expect(line).toContain("$1.23");
+	});
+
+	it("hides cost when showCost is false", () => {
+		const input = makeInput({
+			sessionCost: 1.23,
+			configOverrides: { showCost: false },
+		});
+		const [line] = renderFooter(input, plainTheme, 200);
+		expect(line).not.toContain("$1.23");
+	});
+
+	it("hides cost when sessionCost is 0", () => {
+		const input = makeInput({
+			sessionCost: 0,
+			configOverrides: {
+				showCost: true,
+				layouts: [{ minWidth: 0, left: ["model"], right: ["context", "cost"] }],
+			},
+		});
+		const [line] = renderFooter(input, plainTheme, 200);
+		expect(line).not.toContain("$0.00");
+	});
+
+	it("formats cost with 2 decimal places", () => {
+		const input = makeInput({
+			sessionCost: 0.5,
+			configOverrides: {
+				showCost: true,
+				layouts: [{ minWidth: 0, left: ["model"], right: ["context", "cost"] }],
+			},
+		});
+		const [line] = renderFooter(input, plainTheme, 200);
+		expect(line).toContain("$0.50");
+	});
+
+	it("applies cost color", () => {
+		const input = makeInput({
+			sessionCost: 2.50,
+			configOverrides: {
+				showCost: true,
+				layouts: [{ minWidth: 0, left: ["model"], right: ["context", "cost"] }],
+			},
+		});
+		const [line] = renderFooter(input, captureTheme, 200);
+		expect(line).toContain("[muted:$2.50]");
+	});
+
+	it("cost segment is not in default layouts", () => {
+		const input = makeInput({ sessionCost: 1.23 });
+		const [line] = renderFooter(input, plainTheme, 200);
+		expect(line).not.toContain("$1.23");
 	});
 
 	it("hides cache read when showCacheRead is false", () => {

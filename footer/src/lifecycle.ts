@@ -4,7 +4,7 @@ import path from "node:path";
 import { defaultConfig, loadFooterConfig, type ResolvedConfig } from "./config.js";
 import type { FooterInput, Totals, ToksDisplayState } from "./types.js";
 import { createGitState, type GitStateHandle } from "./git.js";
-import { accumulateTotals } from "./tokens.js";
+import { accumulateTotals, accumulateCost } from "./tokens.js";
 import { normalizeThinkingLevel } from "./utils.js";
 import { createToksActivity, type ToksActivityHandle } from "./toksActivity.js";
 
@@ -29,6 +29,7 @@ export class FooterLifecycle {
 	#getThinkingLevel: () => string | undefined;
 	#onRenderNeeded: () => void;
 	#cachedTotals: Totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+	#cachedCost: number = 0;
 	#cachedBranchLength: number = 0;
 
 	constructor(opts: LifecycleOptions) {
@@ -49,6 +50,7 @@ export class FooterLifecycle {
 
 	async start(ctx: ExtensionContext): Promise<void> {
 		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		this.#cachedCost = 0;
 		this.#cachedBranchLength = 0;
 		this.#cwd = ctx.cwd;
 		this.#loadedConfig = loadFooterConfig(
@@ -182,6 +184,7 @@ async toggle(): Promise<boolean> {
 		const branch = ctx.sessionManager.getBranch();
 		if (branch.length !== this.#cachedBranchLength) {
 			this.#cachedTotals = accumulateTotals(branch);
+			this.#cachedCost = accumulateCost(branch);
 			this.#cachedBranchLength = branch.length;
 		}
 		return {
@@ -193,6 +196,7 @@ async toggle(): Promise<boolean> {
 			contextUsed: ctx.getContextUsage?.()?.tokens ?? 0,
 			contextMax: ctx.model?.contextWindow,
 			totals: this.#cachedTotals,
+			sessionCost: this.#cachedCost,
 			toksState: this.#toks.getState(),
 			config: this.#config,
 		};
@@ -200,6 +204,7 @@ async toggle(): Promise<boolean> {
 
 	#resetState(): void {
 		this.#cachedTotals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+		this.#cachedCost = 0;
 		this.#cachedBranchLength = 0;
 		this.#toks.shutdown();
 	}
