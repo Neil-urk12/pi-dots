@@ -5,13 +5,17 @@ export class ModeFileWatcher {
   ) {}
 
   async hasChanges(since: number): Promise<boolean> {
-    const fs = (await import("fs")).promises;
+    const { promises: fs } = await import("fs");
     const path = await import("path");
 
     try {
       const st = await fs.stat(this.userConfigPath);
       if (st.mtimeMs > since) return true;
-    } catch (_) {}
+    } catch (err: any) {
+      if (err?.code === "EACCES" || err?.code === "EPERM") {
+        console.error(`Permission denied: ${this.userConfigPath}`, err);
+      }
+    }
 
     try {
       const files = await fs.readdir(this.modesDir);
@@ -23,7 +27,11 @@ export class ModeFileWatcher {
           } catch (_) {}
         }
       }
-    } catch (_) {}
+    } catch (err: any) {
+      if (err?.code === "EACCES" || err?.code === "EPERM") {
+        console.error(`Permission denied: ${this.modesDir}`, err);
+      }
+    }
 
     return false;
   }

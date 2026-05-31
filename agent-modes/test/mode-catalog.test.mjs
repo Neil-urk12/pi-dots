@@ -119,3 +119,80 @@ test("invalid extra mode is warning, not catalog failure", async () => {
     await fx.cleanup();
   }
 });
+
+// --- YAML deserialization security tests ---
+
+test("loadAllModes rejects !!js/function tags in mode frontmatter (no code execution)", async () => {
+  const fx = await makeFixture();
+  try {
+    await writeFile(join(fx.modesDir, "plan.md"), `---\nmode: plan\nenabled_tools: []\ndescription: !!js/function "return 'pwned'"\nborder_style: muted\n---\n# plan\n`);
+    const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
+    expect(result.ok).toBe(false);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("loadAllModes rejects !!js/regexp tags in mode frontmatter", async () => {
+  const fx = await makeFixture();
+  try {
+    await writeFile(join(fx.modesDir, "plan.md"), `---\nmode: plan\nenabled_tools: []\ndescription: !!js/regexp /malicious/i\nborder_style: muted\n---\n# plan\n`);
+    const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
+    expect(result.ok).toBe(false);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("user config with !!js/function tags does not execute arbitrary code", async () => {
+  const fx = await makeFixture();
+  try {
+    const maliciousPayload = [
+      "plan:",
+      `  description: !!js/function "(function() { globalThis.__PI_TEST_PWNED = true; return 'pwned'; })"`,
+    ].join("\n");
+    await writeFile(fx.userConfigPath, maliciousPayload);
+    const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
+    expect(globalThis.__PI_TEST_PWNED).toBeUndefined();
+    delete globalThis.__PI_TEST_PWNED;
+    const def = result.catalog.definitions.get("plan");
+    expect(typeof def.description).not.toBe("function");
+  } finally {
+    delete globalThis.__PI_TEST_PWNED;
+    await fx.cleanup();
+  }
+});
+
+test("loadAllModes handles malformed YAML syntax gracefully", async () => {
+  const fx = await makeFixture();
+  try {
+    await writeFile(join(fx.modesDir, "plan.md"), `---\nmode: plan\ndescription: |\n  unclosed block\n`);
+    const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics.some(d => d.message.includes("plan"))).toBe(true);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("loadAllModes rejects !!python/object tags in mode frontmatter", async () => {
+  const fx = await makeFixture();
+  try {
+    await writeFile(join(fx.modesDir, "plan.md"), `---\nmode: plan\nenabled_tools: []\ndescription: !!python/object/apply:os.system ["echo pwned"]\nborder_style: muted\n---\n# plan\n`);
+    const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
+    expect(result.ok).toBe(false);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("loadAllModes rejects arbitrary unknown !! tags", async () => {
+  const fx = await makeFixture();
+  try {
+    await writeFile(join(fx.modesDir, "plan.md"), `---\nmode: plan\nenabled_tools: []\ndescription: !!custom/tag "payload"\nborder_style: muted\n---\n# plan\n`);
+    const result = await loadAllModes({ modesDir: fx.modesDir, userConfigPath: fx.userConfigPath });
+    expect(result.ok).toBe(false);
+  } finally {
+    await fx.cleanup();
+  }
+});
