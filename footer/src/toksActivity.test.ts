@@ -143,6 +143,112 @@ describe("ToksActivity", () => {
 			expect(cjkState.state).toBe("rate");
 			expect(cjkState.value).toBeGreaterThan(asciiState.value);
 		});
+
+		it("produces higher estimates for mixed ASCII + CJK text than pure ASCII of same length", () => {
+			const ascii = createActivity();
+			vi.setSystemTime(1000);
+			ascii.activity.onMessageStart();
+			vi.setSystemTime(2000);
+			ascii.activity.onMessageUpdate("text_delta", "abcdefghij"); // 10 ASCII
+
+			const mixed = createActivity();
+			vi.setSystemTime(1000);
+			mixed.activity.onMessageStart();
+			vi.setSystemTime(2000);
+			mixed.activity.onMessageUpdate("text_delta", "abcde你好世界测试"); // 5 ASCII + 5 CJK
+
+			const asciiState = ascii.activity.getState() as { state: "rate"; value: number };
+			const mixedState = mixed.activity.getState() as { state: "rate"; value: number };
+			expect(mixedState.value).toBeGreaterThan(asciiState.value);
+		});
+
+		it("produces higher estimates for emoji text than same-length ASCII", () => {
+			const ascii = createActivity();
+			vi.setSystemTime(1000);
+			ascii.activity.onMessageStart();
+			vi.setSystemTime(2000);
+			ascii.activity.onMessageUpdate("text_delta", "aa"); // 2 ASCII
+
+			const emoji = createActivity();
+			vi.setSystemTime(1000);
+			emoji.activity.onMessageStart();
+			vi.setSystemTime(2000);
+			emoji.activity.onMessageUpdate("text_delta", "😀😀"); // 2 emoji
+
+			const asciiState = ascii.activity.getState() as { state: "rate"; value: number };
+			const emojiState = emoji.activity.getState() as { state: "rate"; value: number };
+			expect(emojiState.value).toBeGreaterThan(asciiState.value);
+		});
+
+		it("empty delta produces no rate change", () => {
+			const { activity } = createActivity();
+			vi.setSystemTime(1000);
+			activity.onMessageStart();
+			vi.setSystemTime(2000);
+			activity.onMessageUpdate("text_delta", "");
+
+			expect(activity.getState()).toEqual({ state: "pending" });
+		});
+
+		it("returns exact rate for pure ASCII input", () => {
+			const { activity } = createActivity();
+			vi.setSystemTime(1000);
+			activity.onMessageStart();
+			vi.setSystemTime(2000);
+			activity.onMessageUpdate("text_delta", "hello"); // 5 ASCII * 0.25 = 1.25, ceil = 2
+			const state = activity.getState() as { state: "rate"; value: number };
+			expect(state.value).toBe(2);
+		});
+
+		it("returns exact rate for CJK punctuation", () => {
+			const { activity } = createActivity();
+			vi.setSystemTime(1000);
+			activity.onMessageStart();
+			vi.setSystemTime(2000);
+			activity.onMessageUpdate("text_delta", "。「"); // 2 * 0.5 = 1
+			const state = activity.getState() as { state: "rate"; value: number };
+			expect(state.value).toBe(1);
+		});
+
+		it("returns exact rate for Latin extended chars", () => {
+			const { activity } = createActivity();
+			vi.setSystemTime(1000);
+			activity.onMessageStart();
+			vi.setSystemTime(2000);
+			activity.onMessageUpdate("text_delta", "éàü"); // 3 * 0.5 = 1.5, ceil = 2
+			const state = activity.getState() as { state: "rate"; value: number };
+			expect(state.value).toBe(2);
+		});
+
+		it("returns exact rate for Cyrillic", () => {
+			const { activity } = createActivity();
+			vi.setSystemTime(1000);
+			activity.onMessageStart();
+			vi.setSystemTime(2000);
+			activity.onMessageUpdate("text_delta", "Привет"); // 6 * 0.5 = 3
+			const state = activity.getState() as { state: "rate"; value: number };
+			expect(state.value).toBe(3);
+		});
+
+		it("treats newlines and tabs as other characters", () => {
+			const { activity } = createActivity();
+			vi.setSystemTime(1000);
+			activity.onMessageStart();
+			vi.setSystemTime(2000);
+			activity.onMessageUpdate("text_delta", "\n\t"); // 2 * 0.5 = 1
+			const state = activity.getState() as { state: "rate"; value: number };
+			expect(state.value).toBe(1);
+		});
+
+		it("returns exact rate for emoji", () => {
+			const { activity } = createActivity();
+			vi.setSystemTime(1000);
+			activity.onMessageStart();
+			vi.setSystemTime(2000);
+			activity.onMessageUpdate("text_delta", "😀"); // 1 * 1 = 1
+			const state = activity.getState() as { state: "rate"; value: number };
+			expect(state.value).toBe(1);
+		});
 	});
 
 	describe("message_end", () => {
@@ -307,6 +413,80 @@ describe("ToksActivity", () => {
 
 			vi.advanceTimersByTime(300);
 			expect(onRenderNeeded.mock.calls.length).toBeGreaterThan(callsAfterStart);
+		});
+	});
+
+	// ── Tool label normalization ─────────────────────────────
+
+	describe("tool label normalization", () => {
+		it("maps ctx_shell to bash", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("ctx_shell");
+			expect(activity.getState()).toEqual({ state: "activity", label: "bash..." });
+		});
+
+		it("maps ctx_read to read", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("ctx_read");
+			expect(activity.getState()).toEqual({ state: "activity", label: "read..." });
+		});
+
+		it("maps gitnexus_query to nexus via prefix", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("gitnexus_query");
+			expect(activity.getState()).toEqual({ state: "activity", label: "nexus..." });
+		});
+
+		it("maps context7_get_library_docs to docs via prefix", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("context7_get_library_docs");
+			expect(activity.getState()).toEqual({ state: "activity", label: "docs..." });
+		});
+
+		it("maps agent_browser to browser", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("agent_browser");
+			expect(activity.getState()).toEqual({ state: "activity", label: "browser..." });
+		});
+
+		it("maps Agent to agent", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("Agent");
+			expect(activity.getState()).toEqual({ state: "activity", label: "agent..." });
+		});
+
+		it("passes through short unknown name", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("grep");
+			expect(activity.getState()).toEqual({ state: "activity", label: "grep..." });
+		});
+
+		it("truncates long unknown name to 8 chars", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("some_really_long_tool_name");
+			expect(activity.getState()).toEqual({ state: "activity", label: "some_rea..." });
+		});
+
+		it("handles empty string", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("");
+			expect(activity.getState()).toEqual({ state: "activity", label: "..." });
+		});
+
+		it("maps context7_resolve_library_id to docs", () => {
+			const { activity } = createActivity();
+			activity.onMessageStart();
+			activity.onToolStart("context7_resolve_library_id");
+			expect(activity.getState()).toEqual({ state: "activity", label: "docs..." });
 		});
 	});
 
