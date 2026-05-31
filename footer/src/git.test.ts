@@ -109,10 +109,96 @@ describe("createGitState", () => {
 			});
 
 			await handle.refresh();
+			expect(handle.state).toEqual({ inRepo: true, branch: "detached", dirtyCount: 0 });
+		});
+		it("discards stale error when a newer refresh already succeeded", async () => {
+			// First refresh: slow, will eventually fail
+			// Second refresh: fast, succeeds
+			let firstCallback: ((err: Error | null, stdout: string, stderr: string) => void) | undefined;
+			mockExecFile.mockImplementation(
+				(_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+					if (args.includes("--show-current")) {
+						if (!firstCallback) {
+							firstCallback = cb;
+						} else {
+							cb(null, "main\n", "");
+						}
+					} else if (args.includes("--porcelain")) {
+						cb(null, "", "");
+					}
+				},
+			);
 
-			expect(handle.state.branch).toBe("detached");
+			const handle = createGitState({
+				cwd: "/repo",
+				debounceMs: 500,
+				enabled: true,
+			});
+
+			// Start first refresh (held)
+			void handle.refresh();
+
+			// Second refresh completes successfully
+			await handle.refresh();
+			expect(handle.state).toEqual({ inRepo: true, branch: "main", dirtyCount: 0 });
+
+			// First refresh fails — should be discarded (stale)
+			if (firstCallback) firstCallback(new Error("timeout"), "", "");
+
+			// State should still reflect second refresh
+			expect(handle.state).toEqual({ inRepo: true, branch: "main", dirtyCount: 0 });
 		});
 
+		it("silences git exit-code errors (not a git repo)", async () => {
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const exitError = new Error("Command failed: git branch") as Error & { code: number };
+			exitError.code = 128;
+			mockExecFile.mockImplementation(
+				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+					cb(exitError, "", "");
+				},
+			);
+
+			const handle = createGitState({
+				cwd: "/repo",
+				debounceMs: 500,
+				enabled: true,
+			});
+
+			await handle.refresh();
+
+			expect(consoleSpy).not.toHaveBeenCalled();
+			expect(handle.state).toEqual({ inRepo: false, dirtyCount: 0 });
+
+			consoleSpy.mockRestore();
+		});
+
+		it("logs EACCES permission errors", async () => {
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const eaccesError = new Error("spawn git EACCES") as Error & { code: string };
+			eaccesError.code = "EACCES";
+			mockExecFile.mockImplementation(
+				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+					cb(eaccesError, "", "");
+				},
+			);
+
+			const handle = createGitState({
+				cwd: "/repo",
+				debounceMs: 500,
+				enabled: true,
+			});
+
+			await handle.refresh();
+
+			expect(consoleSpy).toHaveBeenCalledWith(
+				"[clean-footer] git refresh failed:",
+				"spawn git EACCES",
+			);
+			expect(handle.state).toEqual({ inRepo: false, dirtyCount: 0 });
+
+			consoleSpy.mockRestore();
+		});
 		it("resets to inRepo=false on error", async () => {
 			mockGitSuccess("main", ""); // first call succeeds
 			const handle = createGitState({
@@ -130,6 +216,130 @@ describe("createGitState", () => {
 				inRepo: false,
 				dirtyCount: 0,
 			});
+		});
+		it("discards stale result when a newer refresh starts", async () => {
+			// First refresh: slow (uses a delayed callback)
+			let firstCallback: ((err: Error | null, stdout: string, stderr: string) => void) | undefined;
+			mockExecFile.mockImplementation(
+				(_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+					if (args.includes("--show-current")) {
+						if (!firstCallback) {
+							// First call: hold the callback
+							firstCallback = cb;
+						} else {
+							// Second call: resolve immediately
+							cb(null, "develop\n", "");
+						}
+					} else if (args.includes("--porcelain")) {
+						cb(null, "M file.ts\n", "");
+					}
+				},
+			);
+
+			const handle = createGitState({
+				cwd: "/repo",
+				debounceMs: 500,
+				enabled: true,
+			});
+
+			// Start first refresh (won't complete — firstCallback is held)
+			void handle.refresh();
+
+			// Start second refresh (will complete immediately)
+			await handle.refresh();
+
+			// State should reflect the second refresh (develop, 1 dirty)
+			expect(handle.state).toEqual({
+				inRepo: true,
+				branch: "develop",
+				dirtyCount: 1,
+			});
+
+			// Now complete the first refresh — its result should be discarded
+			if (firstCallback) firstCallback(null, "main\n", "");
+
+			// State should still be from the second refresh
+			expect(handle.state).toEqual({
+				inRepo: true,
+				branch: "develop",
+				dirtyCount: 1,
+			});
+		});
+
+		it("logs errors with unexpected code (EACCES) to console.error", async () => {
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			mockExecFile.mockImplementation(
+				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+					const err = new Error("spawn git EACCES") as Error & { code: string };
+					err.code = "EACCES";
+					cb(err, "", "");
+				},
+			);
+
+			const handle = createGitState({
+				cwd: "/repo",
+				debounceMs: 500,
+				enabled: true,
+			});
+
+			await handle.refresh();
+
+			expect(consoleSpy).toHaveBeenCalledWith(
+				"[clean-footer] git refresh failed:",
+				"spawn git EACCES",
+			);
+			expect(handle.state).toEqual({ inRepo: false, dirtyCount: 0 });
+
+			consoleSpy.mockRestore();
+		});
+
+		it("silences ENOENT spawn errors (git binary not found)", async () => {
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const enoentError = new Error("git: command not found") as Error & { code: string };
+			enoentError.code = "ENOENT";
+			mockExecFile.mockImplementation(
+				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+					cb(enoentError, "", "");
+				},
+			);
+
+			const handle = createGitState({
+				cwd: "/repo",
+				debounceMs: 500,
+				enabled: true,
+			});
+
+			await handle.refresh();
+
+			expect(consoleSpy).not.toHaveBeenCalled();
+			expect(handle.state).toEqual({ inRepo: false, dirtyCount: 0 });
+
+			consoleSpy.mockRestore();
+		});
+
+		it("silences timeout errors (code: null)", async () => {
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const timeoutError = new Error("Command failed: git branch") as Error & { code: null; killed: boolean };
+			timeoutError.code = null;
+			timeoutError.killed = true;
+			mockExecFile.mockImplementation(
+				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+					cb(timeoutError, "", "");
+				},
+			);
+
+			const handle = createGitState({
+				cwd: "/repo",
+				debounceMs: 500,
+				enabled: true,
+			});
+
+			await handle.refresh();
+
+			expect(consoleSpy).not.toHaveBeenCalled();
+			expect(handle.state).toEqual({ inRepo: false, dirtyCount: 0 });
+
+			consoleSpy.mockRestore();
 		});
 
 		it("clears state and skips git when enabled=false", async () => {

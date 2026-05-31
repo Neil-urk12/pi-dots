@@ -3,6 +3,8 @@ import { promisify } from "node:util";
 
 const execFileAsync = promisify(execFile);
 
+const GIT_TIMEOUT_MS = 2_000;
+
 // ── Types ──────────────────────────────────────────────────────
 
 export type GitState = {
@@ -30,6 +32,7 @@ export function createGitState(options: {
 	let gitState: GitState = { inRepo: false, dirtyCount: 0 };
 	let refreshTimer: ReturnType<typeof setTimeout> | undefined;
 	const onChangeListeners: Array<() => void> = [];
+	let refreshGeneration = 0;
 
 	if (options.onChange) onChangeListeners.push(options.onChange);
 
@@ -39,26 +42,41 @@ export function createGitState(options: {
 			return;
 		}
 
+		const gen = ++refreshGeneration;
 		try {
 			const [branchResult, statusResult] = await Promise.all([
 				execFileAsync("git", ["branch", "--show-current"], {
 					cwd: options.cwd,
-					timeout: 2_000,
+					timeout: GIT_TIMEOUT_MS,
 				}),
 				execFileAsync("git", ["status", "--porcelain"], {
 					cwd: options.cwd,
-					timeout: 2_000,
+					timeout: GIT_TIMEOUT_MS,
 				}),
 			]);
+
+			// Discard stale result if a newer refresh was started.
+			if (gen !== refreshGeneration) return;
 
 			const branch = branchResult.stdout.trim() || "detached";
 			const dirtyCount = statusResult.stdout.split("\n").filter(Boolean).length;
 			gitState = { inRepo: true, branch, dirtyCount };
-		} catch {
+		} catch (err) {
+			if (gen !== refreshGeneration) return;
+			// Error triage — silence expected failures, log unexpected ones:
+			//   ENOENT       → git binary not found (spawn error, string code)
+			//   numeric code → git exited non-zero (not a repo, permission denied, etc.)
+			//   anything else → unexpected runtime error, log for debugging
+			const code = (err as { code?: string | number }).code;
+			if (err instanceof Error && code != null && code !== 'ENOENT' && typeof code !== 'number') {
+				console.error("[clean-footer] git refresh failed:", err.message);
+			}
 			gitState = { inRepo: false, dirtyCount: 0 };
 		}
 
-		for (const cb of onChangeListeners) cb();
+		for (const cb of [...onChangeListeners]) {
+			try { cb(); } catch { /* callback must not crash refresh */ }
+		}
 	}
 
 	function schedule() {

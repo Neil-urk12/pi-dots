@@ -110,10 +110,6 @@ export default function (pi: ExtensionAPI) {
 		lifecycle.onToolExecutionStart(event.toolName);
 	});
 
-	pi.on("tool_execution_update", (event) => {
-		lifecycle.onToolExecutionUpdate(event.toolName);
-	});
-
 	pi.on("tool_execution_end", (event) => {
 		lifecycle.onToolExecutionEnd(event.toolName);
 	});
@@ -127,14 +123,19 @@ export default function (pi: ExtensionAPI) {
 	function installFooter(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
 
-		ctx.ui.setFooter((_tui, _theme) => {
-			requestRender = () => _tui.requestRender();
+		ctx.ui.setFooter((tui, theme) => {
+			requestRender = () => tui.requestRender();
 
 			return {
 				invalidate() {},
 				render(width: number): string[] {
-					const input = lifecycle.getFooterInput(ctx);
-					return renderFooter(input, _theme, width);
+					try {
+						const input = lifecycle.getFooterInput(ctx);
+						return renderFooter(input, theme, width);
+					} catch (err) {
+						console.error("[clean-footer] render failed:", err instanceof Error ? err.message : err);
+						return [];
+					}
 				},
 			};
 		});

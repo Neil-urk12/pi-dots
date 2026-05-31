@@ -17,8 +17,12 @@ export function loadConfig(paths: string[]): ConfigLoadResult {
 	for (const configPath of paths) {
 		if (!existsSync(configPath)) continue;
 		try {
-			const parsed = JSON.parse(readFileSync(configPath, "utf8")) as CleanFooterConfig;
-			merged = mergeConfig(merged, parsed);
+			const raw = JSON.parse(readFileSync(configPath, "utf8"));
+			if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+				error = `${configPath}: config must be a JSON object`;
+				continue;
+			}
+			merged = mergeConfig(merged, raw as CleanFooterConfig); // safe: object guard above; resolveConfigWithWarnings validates and defaults fields
 			loaded.push(configPath);
 		} catch (err) {
 			error = `${configPath}: ${err instanceof Error ? err.message : String(err)}`;
