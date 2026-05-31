@@ -8,6 +8,8 @@ import { accumulateTotals, accumulateCost } from "./tokens.js";
 import { normalizeThinkingLevel } from "./utils.js";
 import { createToksActivity, type ToksActivityHandle } from "./toksActivity.js";
 
+const GIT_REFRESH_TOOLS = ["bash", "edit", "write"];
+
 
 type LifecycleOptions = {
 	globalConfigPath: string;
@@ -24,6 +26,7 @@ export class FooterLifecycle {
 	#toks: ToksActivityHandle;
 	#footerEnabled: boolean;
 	#cwd: string;
+	#directory: string;
 	#globalConfigPath: string;
 	#getProjectConfigPath: (cwd: string) => string;
 	#getThinkingLevel: () => string | undefined;
@@ -43,6 +46,7 @@ export class FooterLifecycle {
 		this.#git = undefined;
 		this.#footerEnabled = true;
 		this.#cwd = "";
+		this.#directory = "";
 		this.#toks = createToksActivity({ onRenderNeeded: () => this.#onRenderNeeded() });
 	}
 
@@ -53,6 +57,7 @@ export class FooterLifecycle {
 		this.#cachedCost = 0;
 		this.#cachedEntriesLength = 0;
 		this.#cwd = ctx.cwd;
+		this.#directory = path.basename(ctx.cwd);
 		this.#loadedConfig = loadFooterConfig(
 			this.#globalConfigPath,
 			this.#getProjectConfigPath(ctx.cwd),
@@ -103,14 +108,10 @@ shutdown(): void {
 		this.#toks.onToolStart(toolName);
 	}
 
-	onToolExecutionUpdate(_toolName: string): void {
-		// Activity timer already handles dot cycling; nothing to do here.
-	}
-
 	onToolExecutionEnd(toolName: string): void {
 		this.#toks.onToolEnd();
 		// Schedule git refresh for relevant tools
-		if (["bash", "edit", "write"].includes(toolName)) {
+		if (GIT_REFRESH_TOOLS.includes(toolName)) {
 			this.#git?.schedule();
 		}
 	}
@@ -144,6 +145,7 @@ shutdown(): void {
 	}
 
 async reload(ctx: ExtensionContext): Promise<void> {
+		// #directory doesn't change on reload — only config does
 		this.#resetState();
 		this.#loadedConfig = loadFooterConfig(
 			this.#globalConfigPath,
@@ -190,7 +192,7 @@ async toggle(): Promise<boolean> {
 		return {
 			modelId: ctx.model?.id ?? "no-model",
 			thinkingLevel: this.#thinkingLevel,
-			directory: path.basename(ctx.cwd),
+			directory: this.#directory || path.basename(ctx.cwd),
 			gitBranch: this.#git?.state.branch,
 			gitDirtyCount: this.#git?.state.dirtyCount ?? 0,
 			contextUsed: ctx.getContextUsage?.()?.tokens ?? 0,

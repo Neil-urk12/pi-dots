@@ -6,7 +6,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 const { mockRefresh, mockReload, mockToggle, mockStart, mockShutdown,
 	mockOnThinkingLevel, mockOnModelSelect, mockOnMessageStart,
 	mockOnMessageEnd, mockOnMessageUpdate, mockOnToolExecutionStart,
-	mockOnToolExecutionUpdate, mockOnToolExecutionEnd, mockOnUserBash,
+	mockOnToolExecutionEnd, mockOnUserBash,
 	mockGetFooterInput, mockIsEnabled, mockLoadedError, mockLoadedWarnings,
 	mockLoadedPaths, mockConfig } = vi.hoisted(() => ({
 	mockRefresh: vi.fn(async () => {}),
@@ -20,7 +20,6 @@ const { mockRefresh, mockReload, mockToggle, mockStart, mockShutdown,
 	mockOnMessageEnd: vi.fn(),
 	mockOnMessageUpdate: vi.fn(),
 	mockOnToolExecutionStart: vi.fn(),
-	mockOnToolExecutionUpdate: vi.fn(),
 	mockOnToolExecutionEnd: vi.fn(),
 	mockOnUserBash: vi.fn(),
 	mockGetFooterInput: vi.fn(() => ({
@@ -56,7 +55,6 @@ vi.mock("./lifecycle.js", () => {
 			onMessageEnd = mockOnMessageEnd;
 			onMessageUpdate = mockOnMessageUpdate;
 			onToolExecutionStart = mockOnToolExecutionStart;
-			onToolExecutionUpdate = mockOnToolExecutionUpdate;
 			onToolExecutionEnd = mockOnToolExecutionEnd;
 			onUserBash = mockOnUserBash;
 			getFooterInput = mockGetFooterInput;
@@ -79,6 +77,7 @@ vi.mock("./usage.js", () => ({
 }));
 
 import extensionFn from "./index.js";
+import { renderFooter } from "./renderer.js";
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -153,7 +152,6 @@ describe("extension entry point", () => {
 			"message_end",
 			"message_update",
 			"tool_execution_start",
-			"tool_execution_update",
 			"tool_execution_end",
 			"user_bash",
 		];
@@ -339,6 +337,34 @@ describe("extension entry point", () => {
 		});
 	});
 
+	it("render returns empty array when renderFooter throws", async () => {
+		const pi = makeMockPi();
+		extensionFn(pi);
+		const ctx = makeMockCtx();
+
+		mockIsEnabled.mockReturnValue(true);
+		await pi._events["session_start"]({}, ctx);
+
+		// Get the render function passed to setFooter
+		const setFooterMock = ctx.ui.setFooter as ReturnType<typeof vi.fn>;
+		const setFooterCall = setFooterMock.mock.calls.find(
+			(call: unknown[]) => typeof call[0] === "function",
+		);
+		expect(setFooterCall).toBeDefined();
+
+		const footerObj = setFooterCall![0](
+			{ requestRender: vi.fn() },
+			{ fg: (_c: string, t: string) => t },
+		);
+
+		vi.mocked(renderFooter).mockImplementationOnce(() => {
+			throw new Error("render failed");
+		});
+
+		const result = footerObj.render(80);
+		expect(result).toEqual([]);
+	});
+
 	// ── Event: session_shutdown ────────────────────────────
 
 	describe("session_shutdown event", () => {
@@ -494,18 +520,6 @@ describe("extension entry point", () => {
 		});
 	});
 
-	// ── Event: tool_execution_update ───────────────────────
-
-	describe("tool_execution_update event", () => {
-		it("forwards tool name to lifecycle", () => {
-			const pi = makeMockPi();
-			extensionFn(pi);
-
-			pi._events["tool_execution_update"]({ toolName: "edit" });
-
-			expect(mockOnToolExecutionUpdate).toHaveBeenCalledWith("edit");
-		});
-	});
 
 	// ── Event: user_bash ──────────────────────────────────
 

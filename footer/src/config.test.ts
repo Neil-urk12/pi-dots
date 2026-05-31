@@ -41,6 +41,65 @@ describe("loadConfig", () => {
 		expect(result.error).toContain(configPath);
 	});
 
+	it("rejects JSON array as root value", () => {
+		const configPath = join(tempDir, "array.json");
+		writeFileSync(configPath, JSON.stringify([1, 2, 3]));
+
+		const result = loadConfig([configPath]);
+		expect(result.loadedPaths).toEqual([]);
+		expect(result.error).toContain("config must be a JSON object");
+	});
+
+	it("rejects JSON null as root value", () => {
+		const configPath = join(tempDir, "null.json");
+		writeFileSync(configPath, "null");
+
+		const result = loadConfig([configPath]);
+		expect(result.loadedPaths).toEqual([]);
+		expect(result.error).toContain("config must be a JSON object");
+	});
+
+	it("rejects JSON string as root value", () => {
+		const configPath = join(tempDir, "string.json");
+		writeFileSync(configPath, JSON.stringify("just a string"));
+
+		const result = loadConfig([configPath]);
+		expect(result.loadedPaths).toEqual([]);
+		expect(result.error).toContain("config must be a JSON object");
+	});
+
+	it("rejects JSON number as root value", () => {
+		const configPath = join(tempDir, "number.json");
+		writeFileSync(configPath, JSON.stringify(42));
+
+		const result = loadConfig([configPath]);
+		expect(result.loadedPaths).toEqual([]);
+		expect(result.error).toContain("config must be a JSON object");
+	});
+	it("skips non-object file but loads valid files after it", () => {
+		const badPath = join(tempDir, "bad.json");
+		const goodPath = join(tempDir, "good.json");
+		writeFileSync(badPath, JSON.stringify([1, 2, 3]));
+		writeFileSync(goodPath, JSON.stringify({ showGit: false }));
+
+		const result = loadConfig([badPath, goodPath]);
+		expect(result.loadedPaths).toEqual([goodPath]);
+		expect(result.config.showGit).toBe(false);
+		expect(result.error).toContain("config must be a JSON object");
+	});
+
+	it("loads valid file but reports error for non-object file after it", () => {
+		const goodPath = join(tempDir, "good.json");
+		const badPath = join(tempDir, "bad.json");
+		writeFileSync(goodPath, JSON.stringify({ separator: " | " }));
+		writeFileSync(badPath, "null");
+
+		const result = loadConfig([goodPath, badPath]);
+		expect(result.loadedPaths).toEqual([goodPath]);
+		expect(result.config.separator).toBe(" | ");
+		expect(result.error).toContain("config must be a JSON object");
+	});
+
 	it("merges multiple config files in order", () => {
 		const global = join(tempDir, "global.json");
 		const project = join(tempDir, "project.json");

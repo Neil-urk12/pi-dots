@@ -5,10 +5,13 @@
  *  1. Explicit alias match on the full modelId
  *  2. Explicit alias match on the provider-stripped name
  *  3. Pattern-based shortening for known model families
- *  4. Truncation to 24 characters (with ellipsis at 21)
+ *  4. Truncation to MAX_MODEL_NAME_LENGTH characters (with ellipsis at TRUNCATION_SLICE)
  */
 
 // ── Public interface ──────────────────────────────────────────
+
+const MAX_MODEL_NAME_LENGTH = 24;
+const TRUNCATION_SLICE = MAX_MODEL_NAME_LENGTH - 3; // room for "…"
 
 export function formatModelName(modelId: string, aliases: Record<string, string>): string {
 	if (aliases[modelId]) return aliases[modelId];
@@ -35,5 +38,5 @@ export function formatModelName(modelId: string, aliases: Record<string, string>
 	const gemini = withoutProvider.match(/gemini-[a-z0-9.-]+/);
 	if (gemini) return gemini[0].replace(/-preview.*/, "");
 
-	return withoutProvider.length > 24 ? `${withoutProvider.slice(0, 21)}…` : withoutProvider;
+	return withoutProvider.length > MAX_MODEL_NAME_LENGTH ? `${withoutProvider.slice(0, TRUNCATION_SLICE)}…` : withoutProvider;
 }

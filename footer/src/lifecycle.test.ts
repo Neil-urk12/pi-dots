@@ -850,6 +850,14 @@ describe("FooterLifecycle", () => {
 			expect(input.modelId).toBe("no-model");
 		});
 
+		it("returns correct directory even before start()", () => {
+			const { lifecycle } = createLifecycle();
+			const input = lifecycle.getFooterInput(
+				makeMockCtx({ cwd: "/home/user/my-project" }),
+			);
+			expect(input.directory).toBe("my-project");
+		});
+
 		it("includes sessionCost from accumulateCost", async () => {
 			const { lifecycle } = createLifecycle();
 			await lifecycle.start(makeMockCtx());
