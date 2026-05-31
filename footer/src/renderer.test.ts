@@ -58,10 +58,10 @@ describe("renderFooter", () => {
 		expect(result).toHaveLength(1);
 	});
 
-	it("returns a string for every width tier", () => {
+	it("renders model name at every width tier", () => {
 		for (const width of [30, 40, 60, 80, 100, 120]) {
 			const [line] = renderFooter(makeInput(), plainTheme, width);
-			expect(line).toBeTypeOf("string");
+			expect(line).toContain("sonnet-4");
 			expect(line.length).toBeGreaterThan(0);
 		}
 	});
@@ -99,7 +99,10 @@ describe("renderFooter", () => {
 	it("shows full tokens at width >= 100", () => {
 		const input = makeInput();
 		const [line] = renderFooter(input, plainTheme, 100);
-		// cache write indicator defaults to false; verified by explicit showCacheWrites test
+		expect(line).toContain("↑");
+		expect(line).toContain("↓");
+		expect(line).toContain("Σ");
+		expect(line).toContain("↯"); // cache read visible by default
 	});
 
 	it("shows no-cache tokens at width 80-99", () => {
