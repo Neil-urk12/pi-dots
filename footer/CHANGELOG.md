@@ -2,6 +2,29 @@
 
 All notable changes to `@neilurk12/pi-clean-footer` are documented here.
 
+## [0.4.2] — 2026-05-31
+
+### Changed
+- Consolidated `tokLabels` and `tokenEstimate` modules into `toksActivity`. Both functions (`normalizeToolLabel`, `estimateTokens`) now private — reduces public API surface.
+- Net -108 lines. Tests migrated, all 363 pass.
+
+---
+
+## [0.4.1] — 2026-05-31
+
+### Fixed
+- **Git refresh hardening** — generation counter discards stale async results. ENOENT and non-zero exit codes silenced; unexpected errors logged.
+- **Config validation** — rejects non-object JSON roots (array, null, string, number).
+- **Render error boundary** — footer exceptions caught, returns `[]` instead of crashing.
+- Git callbacks wrapped in try/catch to prevent refresh crash.
+
+### Changed
+- Deferred token segment computation to active layout only (perf).
+- Extracted magic numbers to named constants (`GIT_TIMEOUT_MS`).
+
+---
+
+
 ## [0.4.0] — 2026-05-31 · 17kb
 
 ### Added
