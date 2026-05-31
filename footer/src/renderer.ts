@@ -16,32 +16,33 @@ export function renderFooter(input: FooterInput, theme: Theme, width: number): s
 
 // ── Private: segment builder ──────────────────────────────────
 
-type SegmentMap = Record<FooterSegmentId, string | undefined>;
+// Segment values are lazy (closures) for token variants — only the active layout's variant is computed.
+type SegmentMap = Record<FooterSegmentId, string | undefined | (() => string | undefined)>;
 
 function buildSegments(input: FooterInput, cf: ColorFn): SegmentMap {
 	const cfg = input.config;
-	const showCacheRead = cfg.showCacheRead;
-	const showCacheWrites = cfg.showCacheWrites;
+
+	// Token segments are lazy — only the variant referenced by the active layout is computed.
+	const tokenSegments = cfg.showTokens
+		? {
+				tokensFull: () =>
+					formatFullTokens(input.totals, {
+						showCacheRead: cfg.showCacheRead,
+						showCacheWrites: cfg.showCacheWrites,
+						cf,
+						color: cfg.colors.tokens,
+					}),
+				tokensNoCache: () => formatNoCacheTokens(input.totals, cf, cfg.colors.tokens),
+				tokensTotal: () => formatTotalOnlyTokens(input.totals, cf, cfg.colors.tokens),
+			}
+		: {};
 
 	return {
 		model: formatModelSegment(input, cf),
 		directory: cfg.showDirectory ? directorySegment(input, cf) : undefined,
 		git: cfg.showGit ? gitSegment(input, cf) : undefined,
 		context: cfg.showContext ? contextSegment(input, cf) : undefined,
-		tokensFull: cfg.showTokens
-			? formatFullTokens(input.totals, {
-					showCacheRead,
-					showCacheWrites,
-					cf,
-					color: cfg.colors.tokens,
-				})
-			: undefined,
-		tokensNoCache: cfg.showTokens
-			? formatNoCacheTokens(input.totals, cf, cfg.colors.tokens)
-			: undefined,
-		tokensTotal: cfg.showTokens
-			? formatTotalOnlyTokens(input.totals, cf, cfg.colors.tokens)
-			: undefined,
+		...tokenSegments,
 		toks: toksSegment(input, cf),
 		cost: costSegment(input, cf),
 	};
@@ -49,7 +50,6 @@ function buildSegments(input: FooterInput, cf: ColorFn): SegmentMap {
 
 // ── Private: low-level helpers ────────────────────────────────
 
-// formatCount is now in utils.ts
 
 // ── Private: segment formatters ───────────────────────────────
 
@@ -120,6 +120,9 @@ function selectLayout(layouts: FooterLayoutConfig[], width: number): FooterLayou
 
 function resolveLayoutSegments(segmentIds: FooterSegmentId[], segments: SegmentMap): string[] {
 	return segmentIds
-		.map((segmentId) => segments[segmentId])
+		.map((segmentId) => {
+			const val = segments[segmentId];
+			return typeof val === "function" ? val() : val;
+		})
 		.filter((segment): segment is string => Boolean(segment));
 }
