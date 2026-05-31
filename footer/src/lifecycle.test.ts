@@ -964,4 +964,44 @@ describe("FooterLifecycle", () => {
 			expect(input.toksState.state).not.toBe("activity");
 		});
 	});
+
+		it("schedules git refresh for bash tool", async () => {
+			const { lifecycle } = createLifecycle();
+			await lifecycle.start(makeMockCtx());
+			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+
+			lifecycle.onToolExecutionEnd("bash");
+
+			expect(handle.schedule).toHaveBeenCalled();
+		});
+
+		it("schedules git refresh for edit tool", async () => {
+			const { lifecycle } = createLifecycle();
+			await lifecycle.start(makeMockCtx());
+			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+
+			lifecycle.onToolExecutionEnd("edit");
+
+			expect(handle.schedule).toHaveBeenCalled();
+		});
+
+		it("schedules git refresh for write tool", async () => {
+			const { lifecycle } = createLifecycle();
+			await lifecycle.start(makeMockCtx());
+			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+
+			lifecycle.onToolExecutionEnd("write");
+
+			expect(handle.schedule).toHaveBeenCalled();
+		});
+
+		it("does not schedule git refresh for other tools", async () => {
+			const { lifecycle } = createLifecycle();
+			await lifecycle.start(makeMockCtx());
+			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+
+			lifecycle.onToolExecutionEnd("web_search");
+
+			expect(handle.schedule).not.toHaveBeenCalled();
+		});
 });
