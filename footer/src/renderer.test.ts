@@ -491,4 +491,45 @@ describe("renderFooter", () => {
 		const [line] = renderFooter(input, plainTheme, 100);
 		expect(line).toContain("↑0 ↓0 Σ0");
 	});
+
+	// ── Cost positioning ────────────────────────────────────
+	it("cost appears before full tokens at width >= 100", () => {
+		const input = makeInput({ sessionCost: 2.5 });
+		const [line] = renderFooter(input, plainTheme, 100);
+		const costPos = line.indexOf("$2.50");
+		const tokensPos = line.indexOf("Σ");
+		expect(costPos).toBeGreaterThan(-1);
+		expect(tokensPos).toBeGreaterThan(-1);
+		expect(costPos).toBeLessThan(tokensPos);
+	});
+
+	it("cost appears before no-cache tokens at width 80", () => {
+		const input = makeInput({ sessionCost: 2.5 });
+		const [line] = renderFooter(input, plainTheme, 80);
+		const costPos = line.indexOf("$2.50");
+		const tokensPos = line.indexOf("Σ");
+		expect(costPos).toBeGreaterThan(-1);
+		expect(tokensPos).toBeGreaterThan(-1);
+		expect(costPos).toBeLessThan(tokensPos);
+	});
+
+	it("cost appears before total-only tokens at width 60", () => {
+		const input = makeInput({ sessionCost: 2.5 });
+		const [line] = renderFooter(input, plainTheme, 60);
+		const costPos = line.indexOf("$2.50");
+		const tokensPos = line.indexOf("Σ");
+		expect(costPos).toBeGreaterThan(-1);
+		expect(tokensPos).toBeGreaterThan(-1);
+		expect(costPos).toBeLessThan(tokensPos);
+	});
+
+	it("cost appears before context at width 40", () => {
+		const input = makeInput({ sessionCost: 2.5 });
+		const [line] = renderFooter(input, plainTheme, 40);
+		const ctxPos = line.indexOf("ctx");
+		const costPos = line.indexOf("$2.50");
+		expect(ctxPos).toBeGreaterThan(-1);
+		expect(costPos).toBeGreaterThan(-1);
+		expect(costPos).toBeLessThan(ctxPos);
+	});
 });
