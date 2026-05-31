@@ -14,6 +14,7 @@ Shows a compact split footer:
 - Event-driven git refresh after file-changing tools and user bash commands
 - Context usage as `used/max`
 - Cumulative active-branch token totals: input, output, total, cache read, cache write
+- Optional session cost display (`$x.xx`) using provider cost data; auto-hides for zero-cost models
 - Adaptive width tiers for narrow terminals
 - `/footer` toggle
 - `/footer refresh` force refresh
@@ -84,22 +85,33 @@ Example:
   "showGit": true,
   "showTokens": true,
   "showCacheRead": true,
-  "showCacheWrites": true,
+  "showCacheWrites": false,
   "showContext": true,
   "showDirectory": true,
   "showEffort": true,
+  "showCost": true,
   "gitRefreshDebounceMs": 500,
-  "separator": " • ",
+  "separator": " | ",
   "layouts": [
     {
       "minWidth": 100,
-      "left": ["model", "directory", "git"],
-      "right": ["context", "tokensFull"]
+      "left": ["model", "directory", "git", "toks"],
+      "right": ["cost", "context", "tokensFull"]
+    },
+    {
+      "minWidth": 80,
+      "left": ["model", "directory", "git", "toks"],
+      "right": ["cost", "context", "tokensNoCache"]
     },
     {
       "minWidth": 60,
-      "left": ["model", "git"],
-      "right": ["context", "tokensTotal"]
+      "left": ["model", "directory", "git", "toks"],
+      "right": ["cost", "context", "tokensTotal"]
+    },
+    {
+      "minWidth": 40,
+      "left": ["model", "directory", "git"],
+      "right": ["cost", "context"]
     },
     {
       "minWidth": 0,
@@ -122,6 +134,7 @@ Example:
     "contextWarning": "warning",
     "contextDanger": "error",
     "tokens": "muted",
+    "cost": "muted",
     "separator": "dim"
   }
 }
@@ -159,6 +172,7 @@ Supported layout segment IDs:
 - `tokensNoCache` - input, output, and total tokens
 - `tokensTotal` - total tokens only
 - `toks` - tokens-per-second rate or activity indicator
+- `cost` - cumulative session cost in `$x.xx` format
 
 `layouts` are selected by the highest `minWidth` less than or equal to the terminal width. `showGit`, `showTokens`, `showContext`, `showDirectory`, and `showEffort` still act as global visibility controls. `showCache` is a deprecated global cache-token gate; use `showCacheRead` and `showCacheWrites` to hide cache read (`↯`) and write (`↥`) counts independently. Unknown or duplicate layout segments are omitted and reported by `/footer config`.
 
