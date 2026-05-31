@@ -95,7 +95,7 @@ async function parseModeDocumentFromMarkdown(filePath: string, mode: string): Pr
     if (!frontmatterMatch) {
       throw new Error("No YAML frontmatter found");
     }
-    return { mode, file: filePath, parsed: yaml.load(frontmatterMatch[1]) };
+    return { mode, file: filePath, parsed: yaml.load(frontmatterMatch[1], { json: true }) };
   } catch (err: any) {
     return { mode, file: filePath, error: err.message };
   }
@@ -128,7 +128,7 @@ async function parseUserOverrides(userConfigPath: string): Promise<ParsedUserOve
   try {
     const raw = await fs.readFile(userConfigPath, "utf-8");
     try {
-      return { file: userConfigPath, parsed: yaml.load(raw) };
+      return { file: userConfigPath, parsed: yaml.load(raw, { json: true }) };
     } catch (err: any) {
       return { file: userConfigPath, parseError: err.message };
     }

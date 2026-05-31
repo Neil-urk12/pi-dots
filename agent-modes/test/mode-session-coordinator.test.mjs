@@ -1,5 +1,41 @@
 import { test, expect, vi } from "vitest";
-import { ModeSessionCoordinator, lastSessionMode } from "../dist/mode-session-coordinator.js";
+import { ModeSessionCoordinator, lastSessionMode } from "../dist/index.js";
+
+// --- checkAndReload error handling ---
+
+test("checkAndReload catches hasChanges errors and resets reloadPending", async () => {
+  const { ModeFileWatcher } = await import("../dist/index.js");
+  const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+  const pi = mockPi();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(mockCtx());
+
+  // Mock hasChanges to throw
+  const watcher = coordinator.fileWatcher;
+  const original = watcher.hasChanges;
+  watcher.hasChanges = vi.fn().mockRejectedValue(new Error("stat boom"));
+
+  // Should not throw
+  await coordinator.checkAndReload();
+
+  // Error was logged with prefix
+  expect(consoleSpy).toHaveBeenCalledWith(
+    "[pi-agent-modes] Error checking for mode file changes:",
+    expect.objectContaining({ message: "stat boom" }),
+  );
+
+  // reloadPending was reset — calling again should not be blocked
+  watcher.hasChanges.mockReset();
+  watcher.hasChanges.mockResolvedValue(false);
+  await coordinator.checkAndReload();
+  expect(watcher.hasChanges).toHaveBeenCalled();
+
+  // Restore
+  watcher.hasChanges = original;
+  consoleSpy.mockRestore();
+});
+
 
 // --- Mocks ---
 

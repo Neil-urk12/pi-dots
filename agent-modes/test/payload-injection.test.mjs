@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { injectIntoPayload } from "../dist/payload-injection.js";
+import { injectIntoPayload } from "../dist/index.js";
 
 test("appends injection to string system payload and returns payload", () => {
   const payload = { system: "base" };

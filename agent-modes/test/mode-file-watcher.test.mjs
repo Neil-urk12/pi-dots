@@ -1,9 +1,25 @@
 import { test, expect, vi } from "vitest";
+
+const { mockFn } = vi.hoisted(() => {
+  return { mockFn: vi.fn() };
+});
+vi.mock("fs", async (importActual) => {
+  const real = await importActual();
+  return {
+    ...real,
+    promises: new Proxy(real.promises, {
+      get(target, prop) {
+        if (prop === "stat" && mockFn.getMockImplementation()) return mockFn;
+        return Reflect.get(target, prop);
+      },
+    }),
+  };
+});
 import { mkdtemp, mkdir, writeFile, rm, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
-import { ModeFileWatcher } from "../dist/mode-file-watcher.js";
+import { ModeFileWatcher } from "../dist/index.js";
 
 async function makeFixture() {
   const root = await mkdtemp(join(tmpdir(), "pi-modes-watcher-"));
@@ -106,7 +122,11 @@ test("EACCES on modesDir logs error and returns false", async () => {
 test("EACCES on userConfigPath logs error and returns false", async () => {
   const fx = await makeFixture();
   try {
-    await chmod(fx.configPath, 0o000);
+    mockFn.mockImplementation(async (p) => {
+      const err = new Error(`EACCES: permission denied, stat '${p}'`);
+      err.code = "EACCES";
+      throw err;
+    });
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     try {
       const watcher = new ModeFileWatcher(fx.modesDir, fx.configPath);
@@ -117,7 +137,7 @@ test("EACCES on userConfigPath logs error and returns false", async () => {
       expect(calls).toMatch(/EACCES|permission/i);
     } finally {
       consoleSpy.mockRestore();
-      await chmod(fx.configPath, 0o644);
+      mockFn.mockReset();
     }
   } finally {
     await fx.cleanup();
