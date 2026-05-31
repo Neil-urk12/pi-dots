@@ -98,6 +98,8 @@ export class ModeSessionCoordinator {
     try {
       const changed = await this.fileWatcher.hasChanges(this.runtime.lastLoadTime());
       if (changed) await this.reload();
+    } catch (err) {
+      console.error("[pi-agent-modes] Error checking for mode file changes:", err);
     } finally {
       this.reloadPending = false;
     }

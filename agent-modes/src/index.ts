@@ -4,6 +4,12 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ModeSessionCoordinator, lastSessionMode, type ModeSelectOption } from "./mode-session-coordinator.js";
+export { buildModeCatalog, loadAllModes } from "./mode-catalog.js";
+export { ModeFileWatcher } from "./mode-file-watcher.js";
+export { ModeRuntimeController } from "./mode-runtime.js";
+export { ModeSessionCoordinator, lastSessionMode } from "./mode-session-coordinator.js";
+export { evaluateToolCall } from "./mode-tool-policy.js";
+export { injectIntoPayload } from "./payload-injection.js";
 
 export default async function (pi: ExtensionAPI) {
   const baseDir = path.dirname(fileURLToPath(import.meta.url));

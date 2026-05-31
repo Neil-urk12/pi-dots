@@ -1,5 +1,5 @@
 import { test, expect } from "vitest";
-import { ModeRuntimeController } from "../dist/mode-runtime.js";
+import { ModeRuntimeController } from "../dist/index.js";
 
 function catalog(modes, loadedAt = 1) {
   return {

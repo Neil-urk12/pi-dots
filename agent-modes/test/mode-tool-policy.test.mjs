@@ -1,6 +1,6 @@
 import { test, expect } from "vitest";
 
-import { evaluateToolCall } from "../dist/mode-tool-policy.js";
+import { evaluateToolCall } from "../dist/index.js";
 
 function decision(input) {
   return evaluateToolCall(input);

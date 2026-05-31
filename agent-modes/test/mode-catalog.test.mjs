@@ -2,7 +2,7 @@ import { test, expect } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildModeCatalog, loadAllModes } from "../dist/mode-catalog.js";
+import { buildModeCatalog, loadAllModes } from "../dist/index.js";
 
 const requiredModes = ["yolo", "plan", "code", "ask", "orchestrator"];
 
