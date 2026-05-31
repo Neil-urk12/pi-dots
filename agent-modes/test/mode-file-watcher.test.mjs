@@ -1,5 +1,5 @@
-import { test, expect } from "vitest";
-import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
+import { test, expect, vi } from "vitest";
+import { mkdtemp, mkdir, writeFile, rm, chmod } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout } from "node:timers/promises";
@@ -76,6 +76,69 @@ test("hasChanges short-circuits on first changed file", async () => {
     await writeFile(fx.configPath, "ask:\n  border_label: BAR\n");
     const result = await watcher.hasChanges(since);
     expect(result).toBe(true);
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+
+test("EACCES on modesDir logs error and returns false", async () => {
+  const fx = await makeFixture();
+  try {
+    await chmod(fx.modesDir, 0o000);
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const watcher = new ModeFileWatcher(fx.modesDir, fx.configPath);
+      const result = await watcher.hasChanges(Date.now() + 100_000);
+      expect(result).toBe(false);
+      expect(consoleSpy).toHaveBeenCalled();
+      const calls = consoleSpy.mock.calls.flat().join(" ");
+      expect(calls).toMatch(/EACCES|permission/i);
+    } finally {
+      consoleSpy.mockRestore();
+      await chmod(fx.modesDir, 0o755);
+    }
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("EACCES on userConfigPath logs error and returns false", async () => {
+  const fx = await makeFixture();
+  try {
+    await chmod(fx.configPath, 0o000);
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const watcher = new ModeFileWatcher(fx.modesDir, fx.configPath);
+      const result = await watcher.hasChanges(Date.now() + 100_000);
+      expect(result).toBe(false);
+      expect(consoleSpy).toHaveBeenCalled();
+      const calls = consoleSpy.mock.calls.flat().join(" ");
+      expect(calls).toMatch(/EACCES|permission/i);
+    } finally {
+      consoleSpy.mockRestore();
+      await chmod(fx.configPath, 0o644);
+    }
+  } finally {
+    await fx.cleanup();
+  }
+});
+
+test("ENOENT does NOT log error (silent expected)", async () => {
+  const fx = await makeFixture();
+  try {
+    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const watcher = new ModeFileWatcher(
+        join(fx.root, "nonexistent"),
+        join(fx.root, "nonexistent.yaml"),
+      );
+      const result = await watcher.hasChanges(0);
+      expect(result).toBe(false);
+      expect(consoleSpy).not.toHaveBeenCalled();
+    } finally {
+      consoleSpy.mockRestore();
+    }
   } finally {
     await fx.cleanup();
   }
