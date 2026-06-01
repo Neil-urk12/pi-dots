@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI, ModelSelectEvent } from "@mariozechner/pi-coding-agent";
 import { loadConfig } from "./src/config";
 import { getAgents, loadAgents } from "./src/registry";
 import { createSubagentRunner } from "./src/runner";
@@ -52,7 +52,22 @@ export default function (pi: ExtensionAPI) {
 	const extDir = path.dirname(new URL(import.meta.url).pathname);
 	const config = loadConfig(extDir);
 	const maxConcurrency = config.maxConcurrency ?? 4;
-	loadAgents(extDir, config);
+
+	// Track parent model so subagents inherit it by default
+	let parentModel: string | undefined;
+	try {
+		pi.on("model_select", (evt: ModelSelectEvent) => {
+			const model = evt?.model;
+			if (model?.id && model?.provider) {
+				parentModel = `${model.provider}/${model.id}`;
+				loadAgents(extDir, config, parentModel);
+			}
+		});
+	} catch (err) {
+		console.error("[subagents] Failed to register model_select handler:", err);
+	}
+
+	loadAgents(extDir, config, parentModel);
 
 	const runner = createSubagentRunner({
 		piBin: resolvePiBinary(),
