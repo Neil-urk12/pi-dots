@@ -355,3 +355,222 @@ test("findModesForTool handles bash with undefined input", () => {
   const result = findModesForTool("bash", catalog, undefined);
   expect(result).toContain("yolo");
 });
+
+test("allowed_agents blocks unknown agent in subagent tool", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout", "worker"] },
+    toolName: "subagent",
+    input: { agent: "editor", task: "edit file" },
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/does not allow agent.*editor/);
+  expect(result.reason).toMatch(/Allowed agents: scout, worker/);
+});
+
+test("allowed_agents permits listed agent in subagent tool", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout", "worker"] },
+    toolName: "subagent",
+    input: { agent: "scout", task: "find file" },
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("allowed_agents empty array permits any agent", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: [] },
+    toolName: "subagent",
+    input: { agent: "anything", task: "do stuff" },
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("allowed_agents undefined permits any agent", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator" },
+    toolName: "subagent",
+    input: { agent: "anything", task: "do stuff" },
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("allowed_agents validates parallel tasks", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout"] },
+    toolName: "subagent",
+    input: { tasks: [{ agent: "scout", task: "find X" }, { agent: "worker", task: "fix Y" }] },
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/does not allow agent.*worker/);
+});
+
+test("allowed_agents validates chain steps", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout", "planner"] },
+    toolName: "subagent",
+    input: { chain: [{ agent: "scout", task: "find X" }, { agent: "worker", task: "fix {previous}" }] },
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/does not allow agent.*worker/);
+});
+
+test("allowed_agents validates Agent tool subagent_type", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["Explore", "Plan"] },
+    toolName: "Agent",
+    input: { subagent_type: "general-purpose", prompt: "do something" },
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/does not allow agent.*general-purpose/);
+});
+
+test("allowed_agents permits listed Agent tool subagent_type", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["Explore", "Plan"] },
+    toolName: "Agent",
+    input: { subagent_type: "Explore", prompt: "find something" },
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("allowed_agents ignored for non-delegation tools", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout"] },
+    toolName: "read",
+    input: { path: "file.ts" },
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("findModesForTool considers allowed_agents", () => {
+  const catalog = new Map([
+    ["orchestrator", { allowed_agents: ["scout", "worker"] }],
+    ["yolo", {}],
+  ]);
+
+  const result = findModesForTool("subagent", catalog, { agent: "editor", task: "edit" });
+
+  expect(result).toContain("yolo");
+  expect(result).not.toContain("orchestrator");
+});
+
+test("findModesForTool includes mode when agent is allowed", () => {
+  const catalog = new Map([
+    ["orchestrator", { allowed_agents: ["scout", "worker"] }],
+    ["yolo", {}],
+  ]);
+
+  const result = findModesForTool("subagent", catalog, { agent: "scout", task: "find" });
+
+  expect(result).toContain("orchestrator");
+  expect(result).toContain("yolo");
+});
+
+// --- Case-insensitive agent matching (TDD red) ---
+
+test("allowed_agents matches agent name case-insensitively", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["Explore", "Plan"] },
+    toolName: "Agent",
+    input: { subagent_type: "explore" },
+  });
+  expect(result.block).toBe(false);
+});
+
+test("allowed_agents matches mixed case variations", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["general-purpose"] },
+    toolName: "Agent",
+    input: { subagent_type: "General-Purpose" },
+  });
+  expect(result.block).toBe(false);
+});
+
+test("allowed_agents blocks agent not in list regardless of case", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["Explore", "Plan"] },
+    toolName: "Agent",
+    input: { subagent_type: "worker" },
+  });
+  expect(result.block).toBe(true);
+});
+
+test("allowed_agents case-insensitive for subagent tool tasks", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout", "worker"] },
+    toolName: "subagent",
+    input: { tasks: [{ agent: "Scout", task: "find X" }] },
+  });
+  expect(result.block).toBe(false);
+});
+
+test("findModesForTool case-insensitive agent matching", () => {
+  const catalog = new Map([
+    ["orchestrator", { allowed_agents: ["Explore", "Plan"] }],
+    ["yolo", {}],
+  ]);
+
+  const result = findModesForTool("Agent", catalog, { subagent_type: "explore" });
+
+  expect(result).toContain("orchestrator");
+});
+
+// --- availableAgents validation (TDD red) ---
+
+test("warns when allowed_agents contains agent not in availableAgents", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout", "nonexistent"] },
+    toolName: "Agent",
+    input: { subagent_type: "scout" },
+    availableAgents: ["scout", "worker", "planner"],
+  });
+  expect(result.block).toBe(false);
+  expect(result.warning).toBeDefined();
+  expect(result.warning).toMatch(/nonexistent/);
+});
+
+test("no warning when all allowed_agents exist in availableAgents", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout", "worker"] },
+    toolName: "Agent",
+    input: { subagent_type: "scout" },
+    availableAgents: ["scout", "worker", "planner"],
+  });
+  expect(result.block).toBe(false);
+  expect(result.warning).toBeUndefined();
+});
+
+test("skips availableAgents validation when availableAgents not provided", () => {
+  const result = decision({
+    mode: "orchestrator",
+    definition: { mode: "orchestrator", allowed_agents: ["scout"] },
+    toolName: "Agent",
+    input: { subagent_type: "scout" },
+  });
+  expect(result.block).toBe(false);
+  expect(result.warning).toBeUndefined();
+});

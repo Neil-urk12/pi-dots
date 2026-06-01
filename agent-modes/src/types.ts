@@ -8,6 +8,7 @@ export interface ModeDefinition {
   description?: string;         // human-readable description for UI
   border_label?: string;        // label displayed on editor border (e.g. " YOLO ")
   border_style?: 'accent' | 'warning' | 'success' | 'muted'; // future theming
+  allowed_agents?: string[];    // subagent names allowed for delegation; undefined or empty = any agent
 }
 
 /** Canonical mode name type */

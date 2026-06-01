@@ -87,6 +87,14 @@ function validateModeDefinition(parsed: unknown, expectedMode: string, file: str
   if (input.border_style !== undefined && !["accent", "warning", "success", "muted"].includes(String(input.border_style))) {
     throw new Error("border_style must be one of accent, warning, success, muted");
   }
+  if (input.allowed_agents !== undefined) {
+    if (!Array.isArray(input.allowed_agents)) {
+      throw new Error("allowed_agents must be an array when present");
+    }
+    if (!input.allowed_agents.every((agent: unknown) => typeof agent === "string")) {
+      throw new Error("allowed_agents must contain only strings");
+    }
+  }
   return {
     mode: String(input.mode),
     enabled_tools: input.enabled_tools as string[] | undefined,
@@ -95,6 +103,7 @@ function validateModeDefinition(parsed: unknown, expectedMode: string, file: str
     description: typeof input.description === "string" ? input.description : undefined,
     border_label: typeof input.border_label === "string" ? input.border_label : undefined,
     border_style: input.border_style as ModeDefinition["border_style"],
+    allowed_agents: input.allowed_agents as string[] | undefined,
   };
 }
 
@@ -179,7 +188,7 @@ function applyUserOverrides(
       diagnostics.push(diagnostic("warning", `User override for '${mode}' must be an object`, { mode, file: userOverrides.file }));
       continue;
     }
-    const allowedKeys: (keyof ModeDefinition)[] = ["enabled_tools", "bash_policy", "prompt_suffix", "description", "border_label", "border_style"];
+    const allowedKeys: (keyof ModeDefinition)[] = ["enabled_tools", "bash_policy", "prompt_suffix", "description", "border_label", "border_style", "allowed_agents"];  
     const filtered: Record<string, unknown> = {};
     for (const key of allowedKeys) {
       if (key in overrides) filtered[key] = (overrides as Record<string, unknown>)[key];

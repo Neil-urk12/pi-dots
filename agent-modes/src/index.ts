@@ -85,8 +85,16 @@ export default async function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     await coordinator.initialize(ctx);
     coordinator.captureBaselineTools();
+
+    // Detect subagent session: Agent tool is excluded by subagent runner
+    const allToolNames = pi.getAllTools().map(t => t.name);
+    const isSubagent = !allToolNames.includes("Agent");
+    const subagentMode = isSubagent
+      ? (allToolNames.includes("write") || allToolNames.includes("edit") ? "code" : "plan")
+      : undefined;
+
     const flag = pi.getFlag("mode");
-    coordinator.restoreMode(typeof flag === "string" ? flag : undefined, lastSessionMode(ctx));
+    coordinator.restoreMode(typeof flag === "string" ? flag : undefined, subagentMode ?? lastSessionMode(ctx));
     coordinator.setupEditor();
   });
 
