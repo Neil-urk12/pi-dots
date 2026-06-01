@@ -54,6 +54,7 @@ function mockCtx(overrides = {}) {
     ui: {
       notify: vi.fn(),
       setStatus: vi.fn(),
+      confirm: vi.fn(),
       select: vi.fn(),
       setEditorComponent: vi.fn(),
       theme: {
@@ -248,7 +249,7 @@ test("evaluateToolCall returns policy decision", async () => {
   await coordinator.initialize(ctx);
 
   // orchestrator now uses bash_policy: strict_readonly — destructive commands blocked
-  const result = coordinator.evaluateToolCall("bash", { command: "rm -rf /" });
+  const result = await coordinator.evaluateToolCall("bash", { command: "rm -rf /" });
 
   expect(result).toMatchObject({ block: true });
 });
@@ -263,12 +264,12 @@ test("orchestrator sets bash_policy: strict_readonly for delegation-only enforce
   expect(def.bash_policy).toBe("strict_readonly");
 });
 
-test("evaluateToolCall blocks when fail-closed (no runtime)", () => {
+test("evaluateToolCall blocks when fail-closed (no runtime)", async () => {
   const pi = mockPi();
   const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
   // No initialize — runtime is undefined
 
-  const result = coordinator.evaluateToolCall("edit", {});
+  const result = await coordinator.evaluateToolCall("edit", {});
 
   expect(result.block).toBe(true);
   expect(result.reason).toContain("fail-closed");
@@ -282,12 +283,12 @@ test("code mode blocks destructive bash but allows dev commands (non_destructive
   await coordinator.handleCommand("code", async () => undefined);
 
   // Destructive command should be blocked
-  const rmResult = coordinator.evaluateToolCall("bash", { command: "rm -rf dist" });
+  const rmResult = await coordinator.evaluateToolCall("bash", { command: "rm -rf dist" });
   expect(rmResult.block).toBe(true);
   expect(rmResult.reason).toContain("destructive");
 
   // Dev command should be allowed
-  const testResult = coordinator.evaluateToolCall("bash", { command: "npm test" });
+  const testResult = await coordinator.evaluateToolCall("bash", { command: "npm test" });
   expect(testResult.block).toBe(false);
 });
 
@@ -436,7 +437,7 @@ test("evaluateToolCall augments reason with suggestion text when blocked", async
   await coordinator.handleCommand("plan", async () => undefined);
 
   // Try to use edit (blocked in plan mode)
-  const result = coordinator.evaluateToolCall("edit", {});
+  const result = await coordinator.evaluateToolCall("edit", {});
 
   expect(result.block).toBe(true);
   // Should contain suggestion text from coordinator wrapper
@@ -593,7 +594,7 @@ test("evaluateToolCall passes availableAgents to policy", async () => {
   try {
     // This should pass availableAgents through to evaluateToolCall
     // which should use it for validation
-    const result = coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
+    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
     expect(result).toBeDefined();
   } finally {
     if (original === undefined) delete globalThis.__pi_subagents;
@@ -611,7 +612,7 @@ test("evaluateToolCall returns warning when allowed_agents references unknown ag
   globalThis.__pi_subagents = { getAgents: () => ["scout", "worker"] };
 
   try {
-    const result = coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
+    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
     expect(result).toBeDefined();
     expect(result.warning).toBeDefined();
     expect(result.warning).toMatch(/unknown agent/);
@@ -631,7 +632,7 @@ test("evaluateToolCall surfaces warning via ctx.ui.notify", async () => {
   globalThis.__pi_subagents = { getAgents: () => ["scout", "worker"] };
 
   try {
-    coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
+    await coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringMatching(/unknown agent/i),
       "warning"
@@ -655,7 +656,7 @@ test("evaluateToolCall surfaces warning when allowed_agents has stale entries", 
   try {
     // Use Agent tool with an agent that IS allowed but config references missing agent "ghost"
     // This triggers: block=false (scout is allowed), warning=true (ghost not in availableAgents)
-    const result = coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
+    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
 
     expect(result).toBeDefined();
     expect(result.block).toBe(false);
@@ -668,4 +669,142 @@ test("evaluateToolCall surfaces warning when allowed_agents has stale entries", 
     if (original === undefined) delete globalThis.__pi_subagents;
     else globalThis.__pi_subagents = original;
   }
+});
+
+test("evaluateToolCall ask path: confirm mock is wired", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(true);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  expect(ctx.ui.confirm).toBeDefined();
+  const result = await ctx.ui.confirm("test", "test msg");
+  expect(result).toBe(true);
+});
+
+test("evaluateToolCall ask path: triggers confirm when permission is ask", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(true);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("test-ask", async () => undefined);
+
+  const result = await coordinator.evaluateToolCall("bash", { command: "rm -rf /" });
+
+  expect(ctx.ui.confirm).toHaveBeenCalled();
+  expect(result.block).toBe(false);
+});
+
+test("evaluateToolCall ask path: user denial returns block", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(false);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("test-ask", async () => undefined);
+
+  const result = await coordinator.evaluateToolCall("bash", { command: "rm -rf /" });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/denied/i);
+});
+
+test("evaluateToolCall ask path: user approval returns allow", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(true);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("test-ask", async () => undefined);
+
+  const result = await coordinator.evaluateToolCall("bash", { command: "ls -la" });
+
+  expect(result.block).toBe(false);
+  expect(result.reason).toBeUndefined();
+});
+
+test("evaluateToolCall ask path: confirm called with correct title and message", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(true);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("test-ask", async () => undefined);
+
+  await coordinator.evaluateToolCall("bash", { command: "echo hello" });
+
+  expect(ctx.ui.confirm).toHaveBeenCalledWith(
+    "Permission Request",
+    expect.stringContaining("bash"),
+  );
+  expect(ctx.ui.confirm).toHaveBeenCalledWith(
+    expect.any(String),
+    expect.stringContaining("TEST-ASK"),
+  );
+});
+
+test("evaluateToolCall ask path: forwards suggestedModes when user confirms", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(true);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("test-ask", async () => undefined);
+
+  // bash is "ask" in test-ask mode; policy computes suggestedModes from catalog
+  const result = await coordinator.evaluateToolCall("bash", { command: "ls -la" });
+
+  expect(result.block).toBe(false);
+  // Bug: coordinator returns { block: false } without forwarding decision.suggestedModes
+  expect(result.suggestedModes).toBeDefined();
+  expect(result.suggestedModes.length).toBeGreaterThan(0);
+});
+
+test("evaluateToolCall ask path: surfaces warning via notify when decision has warning", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(true);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  // test-ask-warn has permissions.bash="ask" + bash_policy="non_destructive"
+  // policy should produce decision with { ask: true, warning: ... }
+  await coordinator.handleCommand("test-ask-warn", async () => undefined);
+
+  await coordinator.evaluateToolCall("bash", { command: "echo hello" });
+
+  expect(ctx.ui.notify).toHaveBeenCalledWith(
+    expect.stringMatching(/bash_policy/),
+    "warning"
+  );
+});
+
+test("evaluateToolCall ask path: forwards warning in return value on confirm", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(true);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("test-ask-warn", async () => undefined);
+
+  const result = await coordinator.evaluateToolCall("bash", { command: "echo hello" });
+
+  expect(result.block).toBe(false);
+  expect(result.warning).toBeDefined();
+  expect(result.warning).toMatch(/bash_policy/);
+});
+
+test("evaluateToolCall ask path: forwards warning in return value on deny", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  ctx.ui.confirm = vi.fn().mockResolvedValue(false);
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("test-ask-warn", async () => undefined);
+
+  const result = await coordinator.evaluateToolCall("bash", { command: "echo hello" });
+
+  expect(result.block).toBe(true);
+  expect(result.warning).toBeDefined();
+  expect(result.warning).toMatch(/bash_policy/);
 });

@@ -1,5 +1,26 @@
 export type BashPolicy = "strict_readonly" | "non_destructive" | "off";
 
+/** Permission action for tool access control */
+export type PermissionAction = "allow" | "ask" | "deny";
+
+/** Overrides for bash command patterns */
+export interface BashPatternOverrides {
+  add?: string[];     // regex patterns to add
+  remove?: string[];  // regex patterns to remove (matched by string equality against built-in source)
+}
+
+/** Configuration for bash command patterns */
+export interface BashPatternConfig {
+  safe?: BashPatternOverrides;
+  destructive?: BashPatternOverrides;
+}
+
+/** Resolved bash patterns ready for evaluation */
+export interface ResolvedBashPatterns {
+  safe: RegExp[];
+  destructive: RegExp[];
+}
+
 export interface ModeDefinition {
   mode: string;
   enabled_tools?: string[];     // tool names to enable; undefined or empty = all tools
@@ -9,6 +30,8 @@ export interface ModeDefinition {
   border_label?: string;        // label displayed on editor border (e.g. " YOLO ")
   border_style?: 'accent' | 'warning' | 'success' | 'muted'; // future theming
   allowed_agents?: string[];    // subagent names allowed for delegation; undefined or empty = any agent
+  permissions?: Record<string, PermissionAction>; // per-tool permission actions
+  bash_patterns?: BashPatternConfig; // custom bash command patterns
 }
 
 /** Canonical mode name type */

@@ -196,3 +196,121 @@ test("loadAllModes rejects arbitrary unknown !! tags", async () => {
     await fx.cleanup();
   }
 });
+
+// --- validateBashPatternConfig tests (via buildModeCatalog) ---
+
+// Helper: build catalog with all required modes + test-specific code mode with bash_patterns
+function buildWithBashPatterns(bashPatterns) {
+  return buildModeCatalog({
+    modeDocuments: [
+      ...parsedRequiredModes().filter(d => d.mode !== "code"),
+      parsedMode("code", { mode: "code", bash_patterns: bashPatterns }),
+    ],
+    fileForMode: (mode) => `/modes/${mode}.md`,
+  });
+}
+
+test("valid bash_patterns with safe and destructive returns structured object", () => {
+  const result = buildWithBashPatterns({
+    safe: { add: ["pattern1"] },
+    destructive: { remove: ["pattern2"] },
+  });
+
+  expect(result.ok).toBe(true);
+  const def = result.catalog.definitions.get("code");
+  expect(def.bash_patterns).toEqual({
+    safe: { add: ["pattern1"] },
+    destructive: { remove: ["pattern2"] },
+  });
+});
+
+test("valid bash_patterns with only safe — destructive absent", () => {
+  const result = buildWithBashPatterns({ safe: { add: ["git status"] } });
+
+  expect(result.ok).toBe(true);
+  const def = result.catalog.definitions.get("code");
+  expect(def.bash_patterns.safe).toEqual({ add: ["git status"] });
+  expect(def.bash_patterns.destructive).toBeUndefined();
+});
+
+test("valid bash_patterns with only destructive — safe absent", () => {
+  const result = buildWithBashPatterns({ destructive: { add: ["rm"] } });
+
+  expect(result.ok).toBe(true);
+  const def = result.catalog.definitions.get("code");
+  expect(def.bash_patterns.safe).toBeUndefined();
+  expect(def.bash_patterns.destructive).toEqual({ add: ["rm"] });
+});
+
+test("empty bash_patterns object returns empty config", () => {
+  const result = buildWithBashPatterns({});
+
+  expect(result.ok).toBe(true);
+  const def = result.catalog.definitions.get("code");
+  expect(def.bash_patterns).toEqual({});
+});
+
+test("undefined bash_patterns passes through as undefined", () => {
+  const result = buildModeCatalog({
+    modeDocuments: parsedRequiredModes(),
+    fileForMode: (mode) => `/modes/${mode}.md`,
+  });
+
+  expect(result.ok).toBe(true);
+  const def = result.catalog.definitions.get("code");
+  expect(def.bash_patterns).toBeUndefined();
+});
+
+test("non-object bash_patterns (null, string, number, boolean) returns undefined — mode loads", () => {
+  for (const bad of [null, "string", 42, true]) {
+    const result = buildWithBashPatterns(bad);
+
+    // validateBashPatternConfig returns undefined for non-objects; mode loads normally
+    expect(result.ok).toBe(true);
+    const def = result.catalog.definitions.get("code");
+    expect(def.bash_patterns).toBeUndefined();
+  }
+});
+
+test("bash_patterns.safe as non-object (array) throws — mode skipped", () => {
+  const result = buildWithBashPatterns({ safe: ["not", "an", "object"] });
+
+  // code mode skipped due to validation error; missing required mode = ok:false
+  expect(result.ok).toBe(false);
+  expect(result.diagnostics.some(d => d.message.includes("safe must be an object"))).toBe(true);
+});
+
+test("bash_patterns.destructive as non-object throws — mode skipped", () => {
+  const result = buildWithBashPatterns({ destructive: 123 });
+
+  expect(result.ok).toBe(false);
+  expect(result.diagnostics.some(d => d.message.includes("destructive must be an object"))).toBe(true);
+});
+
+test("bash_patterns.safe.add as non-array throws — mode skipped", () => {
+  const result = buildWithBashPatterns({ safe: { add: "not-array" } });
+
+  expect(result.ok).toBe(false);
+  expect(result.diagnostics.some(d => d.message.includes("safe.add must be an array of strings"))).toBe(true);
+});
+
+test("bash_patterns.safe.remove as non-string-array throws — mode skipped", () => {
+  const result = buildWithBashPatterns({ safe: { remove: [1, 2] } });
+
+  expect(result.ok).toBe(false);
+  expect(result.diagnostics.some(d => d.message.includes("safe.remove must be an array of strings"))).toBe(true);
+});
+
+test("valid bash_patterns with both add and remove on same key", () => {
+  const result = buildWithBashPatterns({
+    safe: { add: ["git status", "ls"], remove: ["pattern-x"] },
+    destructive: { add: ["rm -rf"], remove: ["pattern-y"] },
+  });
+
+  expect(result.ok).toBe(true);
+  const def = result.catalog.definitions.get("code");
+  expect(def.bash_patterns.safe.add).toEqual(["git status", "ls"]);
+  expect(def.bash_patterns.safe.remove).toEqual(["pattern-x"]);
+  expect(def.bash_patterns.destructive.add).toEqual(["rm -rf"]);
+  expect(def.bash_patterns.destructive.remove).toEqual(["pattern-y"]);
+});
