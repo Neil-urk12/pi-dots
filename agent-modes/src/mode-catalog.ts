@@ -158,6 +158,7 @@ function validateModeDefinition(parsed: unknown, expectedMode: string, file: str
     allowed_agents: input.allowed_agents as string[] | undefined,
     permissions: input.permissions as Record<string, PermissionAction> | undefined,
     bash_patterns: validatedBashPatterns,
+    auto_mode_switch: typeof input.auto_mode_switch === "boolean" ? input.auto_mode_switch : undefined,
   };
 }
 
@@ -256,7 +257,7 @@ function applyUserOverrides(
       diagnostics.push(diagnostic("warning", `User override for '${mode}' must be an object`, { mode, file: userOverrides.file }));
       continue;
     }
-    const allowedKeys: (keyof ModeDefinition)[] = ["enabled_tools", "bash_policy", "prompt_suffix", "description", "border_label", "border_style", "allowed_agents", "permissions", "bash_patterns"];
+    const allowedKeys: (keyof ModeDefinition)[] = ["enabled_tools", "bash_policy", "prompt_suffix", "description", "border_label", "border_style", "allowed_agents", "permissions", "bash_patterns", "auto_mode_switch"];
     const filtered: Record<string, unknown> = {};
     for (const key of allowedKeys) {
       if (key in overrides) filtered[key] = (overrides as Record<string, unknown>)[key];

@@ -351,11 +351,11 @@ test("turnEnd persists mode state", async () => {
   const pi = mockPi();
   const ctx = mockCtx();
   const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
-  await coordinator.initialize(ctx);
+  await coordinator.initialize(ctx, "test-session");
 
   coordinator.turnEnd();
 
-  expect(pi.appendEntry).toHaveBeenCalledWith("mode-state", { mode: coordinator.currentMode() });
+  expect(pi.appendEntry).toHaveBeenCalledWith("mode-state", { mode: coordinator.currentMode(), sessionId: "test-session" });
 });
 
 test("currentDefinition returns active mode definition", async () => {
@@ -506,13 +506,13 @@ test("discoverAvailableAgents handles string array from bridge", async () => {
   await coordinator.initialize(ctx);
 
   const original = globalThis.__pi_subagents;
-  globalThis.__pi_subagents = { getAgents: () => ["scout", "worker", "planner"] };
+  globalThis.__pi_subagents = { getAgents: () => ["blitz", "grind", "seeker"] };
 
   try {
     const injection = coordinator.buildPromptInjection();
     expect(injection).toBeDefined();
-    expect(injection).toContain("scout");
-    expect(injection).toContain("worker");
+    expect(injection).toContain("blitz");
+    expect(injection).toContain("grind");
   } finally {
     if (original === undefined) delete globalThis.__pi_subagents;
     else globalThis.__pi_subagents = original;
@@ -527,14 +527,14 @@ test("discoverAvailableAgents handles object array from bridge", async () => {
 
   const original = globalThis.__pi_subagents;
   globalThis.__pi_subagents = {
-    getAgents: () => [{ name: "scout" }, { name: "worker" }]
+    getAgents: () => [{ name: "blitz" }, { name: "grind" }]
   };
 
   try {
     const injection = coordinator.buildPromptInjection();
     expect(injection).toBeDefined();
-    expect(injection).toContain("scout");
-    expect(injection).toContain("worker");
+    expect(injection).toContain("blitz");
+    expect(injection).toContain("grind");
   } finally {
     if (original === undefined) delete globalThis.__pi_subagents;
     else globalThis.__pi_subagents = original;
@@ -569,13 +569,13 @@ test("buildPromptInjection matches agents case-insensitively", async () => {
 
   const original = globalThis.__pi_subagents;
   // Bridge returns PascalCase from filename, allowed_agents has lowercase
-  globalThis.__pi_subagents = { getAgents: () => ["Explore", "Plan", "scout"] };
+  globalThis.__pi_subagents = { getAgents: () => ["Blitz", "Seeker", "blitz"] };
 
   try {
     const injection = coordinator.buildPromptInjection();
     expect(injection).toBeDefined();
     // All agents should appear regardless of case difference
-    expect(injection).toContain("Explore");
+    expect(injection).toContain("Blitz");
   } finally {
     if (original === undefined) delete globalThis.__pi_subagents;
     else globalThis.__pi_subagents = original;
@@ -589,12 +589,12 @@ test("evaluateToolCall passes availableAgents to policy", async () => {
   await coordinator.initialize(ctx);
 
   const original = globalThis.__pi_subagents;
-  globalThis.__pi_subagents = { getAgents: () => ["scout", "worker"] };
+  globalThis.__pi_subagents = { getAgents: () => ["blitz", "grind"] };
 
   try {
     // This should pass availableAgents through to evaluateToolCall
     // which should use it for validation
-    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
+    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "blitz" });
     expect(result).toBeDefined();
   } finally {
     if (original === undefined) delete globalThis.__pi_subagents;
@@ -609,10 +609,10 @@ test("evaluateToolCall returns warning when allowed_agents references unknown ag
   await coordinator.initialize(ctx);
 
   const original = globalThis.__pi_subagents;
-  globalThis.__pi_subagents = { getAgents: () => ["scout", "worker"] };
+  globalThis.__pi_subagents = { getAgents: () => ["blitz", "grind"] };
 
   try {
-    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
+    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "blitz" });
     expect(result).toBeDefined();
     expect(result.warning).toBeDefined();
     expect(result.warning).toMatch(/unknown agent/);
@@ -629,10 +629,10 @@ test("evaluateToolCall surfaces warning via ctx.ui.notify", async () => {
   await coordinator.initialize(ctx);
 
   const original = globalThis.__pi_subagents;
-  globalThis.__pi_subagents = { getAgents: () => ["scout", "worker"] };
+  globalThis.__pi_subagents = { getAgents: () => ["blitz", "grind"] };
 
   try {
-    await coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
+    await coordinator.evaluateToolCall("Agent", { subagent_type: "blitz" });
     expect(ctx.ui.notify).toHaveBeenCalledWith(
       expect.stringMatching(/unknown agent/i),
       "warning"
@@ -650,13 +650,13 @@ test("evaluateToolCall surfaces warning when allowed_agents has stale entries", 
   await coordinator.initialize(ctx);
 
   const original = globalThis.__pi_subagents;
-  // Bridge only has "scout", but orchestrator's allowed_agents will have "scout" + "ghost"
-  globalThis.__pi_subagents = { getAgents: () => ["scout"] };
+  // Bridge only has "blitz", but orchestrator's allowed_agents will have "blitz" + "ghost"
+  globalThis.__pi_subagents = { getAgents: () => ["blitz"] };
 
   try {
     // Use Agent tool with an agent that IS allowed but config references missing agent "ghost"
     // This triggers: block=false (scout is allowed), warning=true (ghost not in availableAgents)
-    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "scout" });
+    const result = await coordinator.evaluateToolCall("Agent", { subagent_type: "blitz" });
 
     expect(result).toBeDefined();
     expect(result.block).toBe(false);
