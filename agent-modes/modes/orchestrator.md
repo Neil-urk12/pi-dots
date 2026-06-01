@@ -3,6 +3,7 @@ mode: orchestrator
 bash_policy: strict_readonly
 enabled_tools:
   - Agent
+  - bash
   - subagent
   - get_subagent_result
   - steer_subagent
