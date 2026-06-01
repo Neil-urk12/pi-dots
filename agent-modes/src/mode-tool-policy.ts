@@ -1,12 +1,19 @@
-import type { BashPolicy, ModeDefinition } from "./types.js";
+import type { BashPolicy, ModeDefinition, PermissionAction, BashPatternConfig, ResolvedBashPatterns } from "./types.js";
 
-export type ModeCatalogMap = Map<string, { enabled_tools?: string[]; bash_policy?: BashPolicy; allowed_agents?: string[] }>; 
+export type ModeCatalogMap = Map<string, { 
+  enabled_tools?: string[]; 
+  bash_policy?: BashPolicy; 
+  allowed_agents?: string[];
+  permissions?: Record<string, PermissionAction>;
+  bash_patterns?: BashPatternConfig;
+}>;
 
 /** Case-insensitive check: does list contain item? */
 function includesCI(list: string[], item: string): boolean {
   const lower = item.toLowerCase();
   return list.some(a => a.toLowerCase() === lower);
 }
+
 export interface ModeToolPolicyInput {
   mode: string;
   definition?: ModeDefinition;
@@ -16,6 +23,8 @@ export interface ModeToolPolicyInput {
   catalog?: ModeCatalogMap;
   /** Known available agent names from the subagent system. Used to validate allowed_agents. */
   availableAgents?: string[];
+  /** Resolved bash patterns for this mode. */
+  bashPatterns?: ResolvedBashPatterns;
 }
 
 export interface ModeToolPolicyDecision {
@@ -23,6 +32,8 @@ export interface ModeToolPolicyDecision {
   reason?: string;
   suggestedModes?: string[];  // modes that would allow this tool call
   warning?: string;  // non-blocking config issue (e.g. allowed_agents entry not found in availableAgents)
+  ask?: boolean;      // true when user should be prompted
+  askMessage?: string; // message to show in confirmation dialog
 }
 
 /**
@@ -33,10 +44,21 @@ export function findModesForTool(
   toolName: string,
   definitions: ModeCatalogMap,
   input?: unknown,
+  bashPatterns?: ResolvedBashPatterns,
 ): string[] {
   const result: string[] = [];
 
   for (const [mode, def] of definitions) {
+    // Check permissions first
+    if (def.permissions && toolName in def.permissions) {
+      const action = def.permissions[toolName];
+      if (action === "deny") continue; // explicitly denied
+      if (action === "allow" || action === "ask") {
+        result.push(mode);
+        continue;
+      }
+    }
+
     // Check tool allowlist
     const allowed = def.enabled_tools;
     if (Array.isArray(allowed) && allowed.length > 0 && !allowed.includes(toolName)) {
@@ -60,10 +82,10 @@ export function findModesForTool(
       const policy = def.bash_policy;
       const resolvedPolicy = policy ?? resolveDefaultBashPolicy(mode);
 
-      if (resolvedPolicy === "strict_readonly" && !isSafeCommand(command)) {
+      if (resolvedPolicy === "strict_readonly" && !isSafeCommand(command, bashPatterns ?? getBuiltinPatterns())) {
         continue; // bash command not allowed in strict_readonly
       }
-      if (resolvedPolicy === "non_destructive" && isDestructiveCommand(command)) {
+      if (resolvedPolicy === "non_destructive" && isDestructiveCommand(command, bashPatterns ?? getBuiltinPatterns())) {
         continue; // destructive bash not allowed in non_destructive
       }
     }
@@ -91,101 +113,239 @@ const FAIL_CLOSED_READ_ONLY_TOOLS = new Set([
   "ask_user_question",
 ]);
 
-const DESTRUCTIVE_PATTERNS = [
-  /\brm\b/i,
-  /\brmdir\b/i,
-  /\bmv\b/i,
-  /\bcp\b/i,
-  /\bmkdir\b/i,
-  /\btouch\b/i,
-  /\bchmod\b/i,
-  /\bchown\b/i,
-  /\bchgrp\b/i,
-  /\bln\b/i,
-  /\btee\b/i,
-  /\btruncate\b/i,
-  /\bdd\b/i,
-  /\bshred\b/i,
-  /(^|[^<])>(?!>)/,
-  />>/,
-  /\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
-  /\byarn\s+(add|remove|install|publish)/i,
-  /\bpnpm\s+(add|remove|install|publish)/i,
-  /\bpip\s+(install|uninstall)/i,
-  /\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
-  /\bbrew\s+(install|uninstall|upgrade)/i,
-  /\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)/i,
-  /\bsudo\b/i,
-  /\bsu\b/i,
-  /\bkill\b/i,
-  /\bpkill\b/i,
-  /\bkillall\b/i,
-  /\breboot\b/i,
-  /\bshutdown\b/i,
-  /\bsystemctl\s+(start|stop|restart|enable|disable)/i,
-  /\bservice\s+\S+\s+(start|stop|restart)/i,
-  /\b(vim?|nano|emacs|code|subl)\b/i,
-  /\bcurl\b.*\s-(?:[a-zA-Z]*[oO])(?!\s*-)/i,
-  /\bcurl\b.*--output\b/i,
-  /\bcurl\b.*--remote-name\b/i,
-  /\bcurl\b.*--remote-header-name\b/i,
-  /\bcurl\b.*--create-dirs\b/i,
-] as const;
+const MAX_BASH_PATTERN_LENGTH = 200;
 
-const SAFE_PATTERNS = [
-  /^\s*cat\b/,
-  /^\s*head\b/,
-  /^\s*tail\b/,
-  /^\s*less\b/,
-  /^\s*more\b/,
-  /^\s*grep\b/,
-  /^\s*find\b/,
-  /^\s*ls\b/,
-  /^\s*pwd\b/,
-  /^\s*echo\b/,
-  /^\s*printf\b/,
-  /^\s*wc\b/,
-  /^\s*sort\b/,
-  /^\s*uniq\b/,
-  /^\s*diff\b/,
-  /^\s*file\b/,
-  /^\s*stat\b/,
-  /^\s*du\b/,
-  /^\s*df\b/,
-  /^\s*tree\b/,
-  /^\s*which\b/,
-  /^\s*whereis\b/,
-  /^\s*type\b/,
-  /^\s*env\b/,
-  /^\s*printenv\b/,
-  /^\s*uname\b/,
-  /^\s*whoami\b/,
-  /^\s*id\b/,
-  /^\s*date\b/,
-  /^\s*cal\b/,
-  /^\s*uptime\b/,
-  /^\s*ps\b/,
-  /^\s*top\b/,
-  /^\s*htop\b/,
-  /^\s*free\b/,
-  /^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)/i,
-  /^\s*git\s+ls-/i,
-  /^\s*npm\s+(list|ls|view|info|search|outdated|audit)/i,
-  /^\s*yarn\s+(list|info|why|audit)/i,
-  /^\s*node\s+--version/i,
-  /^\s*python\s+--version/i,
-  /^\s*wget\s+-O\s*-/i,
-  /^\s*jq\b/,
-  /^\s*sed\s+-n/i,
-  /^\s*awk\b/,
-  /^\s*rg\b/,
-  /^\s*fd\b/,
-  /^\s*bat\b/,
-  /^\s*eza\b/,
-] as const;
+/** Detect nested quantifiers (e.g. `(a+)+`) that risk ReDoS catastrophic backtracking. */
+const REDOS_PATTERN = /(?<![\\])\((?:[^)\\]|\\.)*[+*](?:[^)\\]|\\.)*\)[+*?]/;
 
-export function evaluateToolCall({ mode, definition, toolName, input, catalog, availableAgents }: ModeToolPolicyInput): ModeToolPolicyDecision {
-  const suggestedModes = catalog ? findModesForTool(toolName, catalog, input) : undefined;
+const DESTRUCTIVE_PATTERNS_SOURCE = [
+  "\\brm\\b",
+  "\\brmdir\\b",
+  "\\bmv\\b",
+  "\\bcp\\b",
+  "\\bmkdir\\b",
+  "\\btouch\\b",
+  "\\bchmod\\b",
+  "\\bchown\\b",
+  "\\bchgrp\\b",
+  "\\bln\\b",
+  "\\btee\\b",
+  "\\btruncate\\b",
+  "\\bdd\\b",
+  "\\bshred\\b",
+  "(^|[^<])>(?!>)",
+  ">>",
+  "\\bnpm\\s+(install|uninstall|update|ci|link|publish)",
+  "\\byarn\\s+(add|remove|install|publish)",
+  "\\bpnpm\\s+(add|remove|install|publish)",
+  "\\bpip\\s+(install|uninstall)",
+  "\\bapt(-get)?\\s+(install|remove|purge|update|upgrade)",
+  "\\bbrew\\s+(install|uninstall|upgrade)",
+  "\\bgit\\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)",
+  "\\bsudo\\b",
+  "\\bsu\\b",
+  "\\bkill\\b",
+  "\\bpkill\\b",
+  "\\bkillall\\b",
+  "\\breboot\\b",
+  "\\bshutdown\\b",
+  "\\bsystemctl\\s+(start|stop|restart|enable|disable)",
+  "\\bservice\\s+\\S+\\s+(start|stop|restart)",
+  "\\b(vim?|nano|emacs|code|subl)\\b",
+  "\\bcurl\\b.*\\s-(?:[a-zA-Z]*[oO])(?!\\s*-)",
+  "\\bcurl\\b.*--output\\b",
+  "\\bcurl\\b.*--remote-name\\b",
+  "\\bcurl\\b.*--remote-header-name\\b",
+  "\\bcurl\\b.*--create-dirs\\b",
+];
+
+const SAFE_PATTERNS_SOURCE = [
+  "^\\s*cat\\b",
+  "^\\s*head\\b",
+  "^\\s*tail\\b",
+  "^\\s*less\\b",
+  "^\\s*more\\b",
+  "^\\s*grep\\b",
+  "^\\s*find\\b",
+  "^\\s*ls\\b",
+  "^\\s*pwd\\b",
+  "^\\s*echo\\b",
+  "^\\s*printf\\b",
+  "^\\s*wc\\b",
+  "^\\s*sort\\b",
+  "^\\s*uniq\\b",
+  "^\\s*diff\\b",
+  "^\\s*file\\b",
+  "^\\s*stat\\b",
+  "^\\s*du\\b",
+  "^\\s*df\\b",
+  "^\\s*tree\\b",
+  "^\\s*which\\b",
+  "^\\s*whereis\\b",
+  "^\\s*type\\b",
+  "^\\s*env\\b",
+  "^\\s*printenv\\b",
+  "^\\s*uname\\b",
+  "^\\s*whoami\\b",
+  "^\\s*id\\b",
+  "^\\s*date\\b",
+  "^\\s*cal\\b",
+  "^\\s*uptime\\b",
+  "^\\s*ps\\b",
+  "^\\s*top\\b",
+  "^\\s*htop\\b",
+  "^\\s*free\\b",
+  "^\\s*git\\s+(status|log|diff|show|branch|remote|config\\s+--get)",
+  "^\\s*git\\s+ls-",
+  "^\\s*npm\\s+(list|ls|view|info|search|outdated|audit)",
+  "^\\s*yarn\\s+(list|info|why|audit)",
+  "^\\s*node\\s+--version",
+  "^\\s*python\\s+--version",
+  "^\\s*wget\\s+-O\\s*-",
+  "^\\s*jq\\b",
+  "^\\s*sed\\s+-n",
+  "^\\s*awk\\b",
+  "^\\s*rg\\b",
+  "^\\s*fd\\b",
+  "^\\s*bat\\b",
+  "^\\s*eza\\b",
+];
+
+/** Get built-in patterns as RegExp arrays (cached at module level) */
+const BUILTIN_PATTERNS: ResolvedBashPatterns = {
+  safe: SAFE_PATTERNS_SOURCE.map(p => new RegExp(p)),
+  destructive: DESTRUCTIVE_PATTERNS_SOURCE.map(p => new RegExp(p, "i")),
+};
+
+function getBuiltinPatterns(): ResolvedBashPatterns {
+  return BUILTIN_PATTERNS;
+}
+
+/** Resolve bash patterns from config and overrides */
+export function resolveBashPatterns(
+  globalOverrides?: BashPatternConfig,
+  modeOverrides?: BashPatternConfig,
+): ResolvedBashPatterns {
+  const builtin = getBuiltinPatterns();
+  const safe: RegExp[] = [...builtin.safe];
+  const destructive: RegExp[] = [...builtin.destructive];
+  const safeSource: string[] = [...SAFE_PATTERNS_SOURCE];
+  const destructiveSource: string[] = [...DESTRUCTIVE_PATTERNS_SOURCE];
+
+  // Apply global overrides
+  if (globalOverrides) {
+    applyPatternOverrides(safe, safeSource, globalOverrides.safe);
+    applyPatternOverrides(destructive, destructiveSource, globalOverrides.destructive);
+  }
+
+  // Apply mode-specific overrides
+  if (modeOverrides) {
+    applyPatternOverrides(safe, safeSource, modeOverrides.safe);
+    applyPatternOverrides(destructive, destructiveSource, modeOverrides.destructive);
+  }
+
+  return { safe, destructive };
+}
+
+function applyPatternOverrides(
+  target: RegExp[],
+  source: string[],
+  overrides?: { add?: string[]; remove?: string[] },
+): void {
+  if (!overrides) return;
+
+  // Remove patterns by matching source strings
+  if (overrides.remove) {
+    const removeSet = new Set(overrides.remove);
+    const keepIndices: number[] = [];
+    for (let i = 0; i < source.length; i++) {
+      if (!removeSet.has(source[i])) {
+        keepIndices.push(i);
+      }
+    }
+    // Rebuild both arrays with only kept items
+    const keptTarget = keepIndices.map(i => target[i]);
+    const keptSource = keepIndices.map(i => source[i]);
+    target.length = 0;
+    source.length = 0;
+    target.push(...keptTarget);
+    source.push(...keptSource);
+  }
+
+  // Add patterns
+  if (overrides.add) {
+    for (const patternToAdd of overrides.add) {
+      if (patternToAdd.length > MAX_BASH_PATTERN_LENGTH) {
+        console.warn(`[pi-agent-modes] Skipping bash pattern exceeding ${MAX_BASH_PATTERN_LENGTH} chars`);
+        continue;
+      }
+      if (REDOS_PATTERN.test(patternToAdd)) {
+        console.warn(`[pi-agent-modes] Skipping bash pattern with nested quantifiers (ReDoS risk): ${patternToAdd}`);
+        continue;
+      }
+      try {
+        target.push(new RegExp(patternToAdd));
+        source.push(patternToAdd);
+      } catch (e) {
+        console.warn(`[pi-agent-modes] Skipping invalid bash pattern: ${patternToAdd} — ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+  }
+}
+
+/** Validate a regex pattern string */
+export function validateBashPattern(pattern: string): { valid: boolean; error?: string } {
+  try {
+    new RegExp(pattern);
+    return { valid: true };
+  } catch (e: unknown) {
+    return { valid: false, error: `Invalid regex: ${pattern} — ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+
+export function evaluateToolCall({ 
+  mode, 
+  definition, 
+  toolName, 
+  input, 
+  catalog, 
+  availableAgents,
+  bashPatterns 
+}: ModeToolPolicyInput): ModeToolPolicyDecision {
+  const suggestedModes = catalog ? findModesForTool(toolName, catalog, input, bashPatterns) : undefined;
+  
+  // Check explicit permissions first
+  const action = definition?.permissions?.[toolName];
+  if (action) {
+    if (action === "deny") {
+      return {
+        block: true,
+        reason: `${mode.toUpperCase()} mode explicitly denies tool: ${toolName}`,
+        suggestedModes,
+      };
+    }
+    if (action === "allow") {
+      const warning = definition?.bash_policy
+        ? `permissions.allow for "${toolName}" overrides bash_policy "${definition.bash_policy}"`
+        : undefined;
+      return { block: false, suggestedModes, warning };
+    
+    }
+    if (action === "ask") {
+      const warning = definition?.bash_policy
+        ? `permissions.ask for "${toolName}" alongside bash_policy "${definition.bash_policy}"`
+        : undefined;
+      return {
+        block: false,
+        ask: true,
+        askMessage: `Allow tool "${toolName}" in ${mode.toUpperCase()} mode?`,
+        suggestedModes,
+        warning,
+      };
+    }
+  }
+
   if (!definition) {
     if (!FAIL_CLOSED_READ_ONLY_TOOLS.has(toolName)) {
       return {
@@ -197,7 +357,8 @@ export function evaluateToolCall({ mode, definition, toolName, input, catalog, a
 
     if (toolName === "bash") {
       const command = commandFromInput(input);
-      if (!isSafeCommand(command)) {
+      const patterns = bashPatterns ?? getBuiltinPatterns();
+      if (!isSafeCommand(command, patterns)) {
         return {
           block: true,
           reason: `Mode '${mode}' not initialized — fail-closed blocked unsafe command: ${command}`,
@@ -249,8 +410,9 @@ export function evaluateToolCall({ mode, definition, toolName, input, catalog, a
   if (toolName === "bash") {
     const command = commandFromInput(input);
     const bashPolicy = resolveBashPolicy(mode, definition);
+    const patterns = bashPatterns ?? getBuiltinPatterns();
 
-    if (bashPolicy === "strict_readonly" && !isSafeCommand(command)) {
+    if (bashPolicy === "strict_readonly" && !isSafeCommand(command, patterns)) {
       return {
         block: true,
         reason: `${mode.toUpperCase()} mode blocked unsafe command: ${command}\nAllowed read-only commands only.`,
@@ -258,7 +420,7 @@ export function evaluateToolCall({ mode, definition, toolName, input, catalog, a
       };
     }
 
-    if (bashPolicy === "non_destructive" && isDestructiveCommand(command)) {
+    if (bashPolicy === "non_destructive" && isDestructiveCommand(command, patterns)) {
       return {
         block: true,
         reason: `${mode.toUpperCase()} mode blocked destructive command: ${command}\nAllowed development commands only.`,
@@ -313,10 +475,10 @@ function resolveBashPolicy(mode: string, definition: ModeDefinition): BashPolicy
   return resolveDefaultBashPolicy(mode);
 }
 
-function isDestructiveCommand(command: string): boolean {
-  return DESTRUCTIVE_PATTERNS.some((pattern) => pattern.test(command));
+function isDestructiveCommand(command: string, patterns: ResolvedBashPatterns): boolean {
+  return patterns.destructive.some((pattern) => pattern.test(command));
 }
 
-function isSafeCommand(command: string): boolean {
-  return !isDestructiveCommand(command) && SAFE_PATTERNS.some((pattern) => pattern.test(command));
+function isSafeCommand(command: string, patterns: ResolvedBashPatterns): boolean {
+  return !isDestructiveCommand(command, patterns) && patterns.safe.some((pattern) => pattern.test(command));
 }

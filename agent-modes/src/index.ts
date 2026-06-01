@@ -8,7 +8,7 @@ export { buildModeCatalog, loadAllModes } from "./mode-catalog.js";
 export { ModeFileWatcher } from "./mode-file-watcher.js";
 export { ModeRuntimeController } from "./mode-runtime.js";
 export { ModeSessionCoordinator, lastSessionMode } from "./mode-session-coordinator.js";
-export { evaluateToolCall, findModesForTool } from "./mode-tool-policy.js";
+export { evaluateToolCall, findModesForTool, resolveBashPatterns, validateBashPattern } from "./mode-tool-policy.js";
 export { injectIntoPayload } from "./payload-injection.js";
 
 export default async function (pi: ExtensionAPI) {

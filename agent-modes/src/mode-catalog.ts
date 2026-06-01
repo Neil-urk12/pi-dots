@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ModeDefinition } from "./types.js";
+import type { ModeDefinition, PermissionAction, BashPatternConfig, BashPatternOverrides } from "./types.js";
 import { USER_CONFIG_DIR, USER_CONFIG_FILE, errorMessage, errorCode } from "./types.js";
 
 export const REQUIRED_BUILT_IN_MODES = ["yolo", "plan", "code", "ask", "orchestrator"] as const;
@@ -22,6 +22,7 @@ export interface ModeCatalogDiagnostic {
 export interface ModeCatalog {
   definitions: Map<string, ModeDefinition>;
   loadedAt: number;
+  globalBashPatterns?: BashPatternConfig;
 }
 
 export type ModeCatalogResult =
@@ -61,6 +62,42 @@ function diagnostic(level: DiagnosticLevel, message: string, extras: Partial<Mod
 }
 
 const VALID_MODE_NAME = /^[a-z0-9_-]+$/;
+const VALID_PERMISSION_ACTIONS: PermissionAction[] = ["allow", "ask", "deny"];
+
+function validateBashPatternConfig(patterns: unknown, context: string): BashPatternConfig | undefined {
+  if (!patterns || typeof patterns !== "object") return undefined;
+  const input = patterns as Record<string, unknown>;
+  const result: BashPatternConfig = {};
+  
+  for (const key of ["safe", "destructive"] as const) {
+    if (key in input) {
+      const overrides = input[key];
+      if (!overrides || typeof overrides !== "object" || Array.isArray(overrides)) {
+        throw new Error(`${context}.${key} must be an object`);
+      }
+      const overrideObj = overrides as Record<string, unknown>;
+      const validated: BashPatternOverrides = {};
+      
+      if ("add" in overrideObj) {
+        if (!Array.isArray(overrideObj.add) || !overrideObj.add.every((p: unknown) => typeof p === "string")) {
+          throw new Error(`${context}.${key}.add must be an array of strings`);
+        }
+        validated.add = overrideObj.add as string[];
+      }
+      
+      if ("remove" in overrideObj) {
+        if (!Array.isArray(overrideObj.remove) || !overrideObj.remove.every((p: unknown) => typeof p === "string")) {
+          throw new Error(`${context}.${key}.remove must be an array of strings`);
+        }
+        validated.remove = overrideObj.remove as string[];
+      }
+      
+      result[key] = validated;
+    }
+  }
+  
+  return result;
+}
 
 function validateModeDefinition(parsed: unknown, expectedMode: string, file: string): ModeDefinition {
   if (!parsed || typeof parsed !== "object") {
@@ -95,6 +132,21 @@ function validateModeDefinition(parsed: unknown, expectedMode: string, file: str
       throw new Error("allowed_agents must contain only strings");
     }
   }
+  if (input.permissions !== undefined) {
+    if (!input.permissions || typeof input.permissions !== "object" || Array.isArray(input.permissions)) {
+      throw new Error("permissions must be an object when present");
+    }
+    const perms = input.permissions as Record<string, unknown>;
+    for (const [tool, action] of Object.entries(perms)) {
+      if (typeof tool !== "string" || tool.length === 0) {
+        throw new Error("permissions keys must be non-empty strings");
+      }
+      if (!VALID_PERMISSION_ACTIONS.includes(action as PermissionAction)) {
+        throw new Error(`permissions.${tool} must be one of allow, ask, deny`);
+      }
+    }
+  }
+  const validatedBashPatterns = validateBashPatternConfig(input.bash_patterns, "bash_patterns");
   return {
     mode: String(input.mode),
     enabled_tools: input.enabled_tools as string[] | undefined,
@@ -104,6 +156,8 @@ function validateModeDefinition(parsed: unknown, expectedMode: string, file: str
     border_label: typeof input.border_label === "string" ? input.border_label : undefined,
     border_style: input.border_style as ModeDefinition["border_style"],
     allowed_agents: input.allowed_agents as string[] | undefined,
+    permissions: input.permissions as Record<string, PermissionAction> | undefined,
+    bash_patterns: validatedBashPatterns,
   };
 }
 
@@ -164,22 +218,36 @@ function applyUserOverrides(
   definitions: Map<string, ModeDefinition>,
   userOverrides: ParsedUserOverrides | undefined,
   diagnostics: ModeCatalogDiagnostic[],
-): void {
-  if (!userOverrides) return;
+): { globalBashPatterns?: BashPatternConfig } {
+  if (!userOverrides) return {};
 
   if (userOverrides.readError) {
     diagnostics.push(diagnostic("warning", `User override read error: ${userOverrides.readError}`, { file: userOverrides.file }));
-    return;
+    return {};
   }
 
   if (userOverrides.parseError) {
     diagnostics.push(diagnostic("warning", `User override parse error: ${userOverrides.parseError}`, { file: userOverrides.file }));
-    return;
+    return {};
   }
 
-  const parsed: any = userOverrides.parsed;
-  if (!parsed || typeof parsed !== "object") return;
+  const parsed = userOverrides.parsed as Record<string, unknown> | null | undefined;
+  if (!parsed || typeof parsed !== "object") return {};
+
+  let globalBashPatterns: BashPatternConfig | undefined;
+
+  // Extract global bash_patterns before processing mode overrides
+  if ("bash_patterns" in parsed && parsed.bash_patterns && typeof parsed.bash_patterns === "object") {
+    try {
+      globalBashPatterns = validateBashPatternConfig(parsed.bash_patterns, "global bash_patterns");
+    } catch (err: unknown) {
+      diagnostics.push(diagnostic("warning", `Invalid global bash_patterns: ${errorMessage(err)}`, { file: userOverrides.file }));
+    }
+  }
+
   for (const [mode, overrides] of Object.entries(parsed)) {
+    if (mode === "bash_patterns") continue; // Skip global config key
+
     if (!definitions.has(mode)) {
       diagnostics.push(diagnostic("warning", `Unknown user override ignored: ${mode}`, { mode, file: userOverrides.file }));
       continue;
@@ -188,13 +256,33 @@ function applyUserOverrides(
       diagnostics.push(diagnostic("warning", `User override for '${mode}' must be an object`, { mode, file: userOverrides.file }));
       continue;
     }
-    const allowedKeys: (keyof ModeDefinition)[] = ["enabled_tools", "bash_policy", "prompt_suffix", "description", "border_label", "border_style", "allowed_agents"];  
+    const allowedKeys: (keyof ModeDefinition)[] = ["enabled_tools", "bash_policy", "prompt_suffix", "description", "border_label", "border_style", "allowed_agents", "permissions", "bash_patterns"];
     const filtered: Record<string, unknown> = {};
     for (const key of allowedKeys) {
       if (key in overrides) filtered[key] = (overrides as Record<string, unknown>)[key];
     }
+    // Validate permissions if present
+    if (filtered.permissions) {
+      const perms = filtered.permissions as Record<string, unknown>;
+      if (!perms || typeof perms !== "object" || Array.isArray(perms)) {
+        diagnostics.push({ level: "error", message: `User override for ${mode}: permissions must be an object`, mode });
+        delete filtered.permissions;
+      }
+    }
+
+    // Validate bash_patterns if present
+    if (filtered.bash_patterns) {
+      try {
+        filtered.bash_patterns = validateBashPatternConfig(filtered.bash_patterns, `${mode} user override bash_patterns`);
+      } catch {
+        diagnostics.push({ level: "error", message: `User override for ${mode}: invalid bash_patterns`, mode });
+        delete filtered.bash_patterns;
+      }
+    }
     definitions.set(mode, { ...definitions.get(mode)!, ...filtered, mode });
   }
+
+  return { globalBashPatterns };
 }
 
 export function buildModeCatalog(input: BuildModeCatalogInput): ModeCatalogResult {
@@ -227,11 +315,11 @@ export function buildModeCatalog(input: BuildModeCatalogInput): ModeCatalogResul
     return { ok: false, diagnostics };
   }
 
-  applyUserOverrides(definitions, input.userOverrides, diagnostics);
+  const { globalBashPatterns } = applyUserOverrides(definitions, input.userOverrides, diagnostics);
 
   return {
     ok: true,
-    catalog: { definitions, loadedAt: input.now?.() ?? Date.now() },
+    catalog: { definitions, loadedAt: input.now?.() ?? Date.now(), globalBashPatterns },
     diagnostics,
   };
 }

@@ -1,5 +1,5 @@
 import type { ModeCatalog } from "./mode-catalog.js";
-import type { ModeDefinition } from "./types.js";
+import type { ModeDefinition, BashPatternConfig } from "./types.js";
 import { DEFAULT_MODE, SAFE_FALLBACK_MODES } from "./types.js";
 import type { ModeCatalogMap } from "./mode-tool-policy.js";
 
@@ -260,6 +260,11 @@ export class ModeRuntimeController {
   activeTools(): string[] {
     const enabled = this.definition()?.enabled_tools;
     return enabled && enabled.length > 0 ? [...enabled] : [...this.baselineTools];
+  }
+
+  /** Get global bash patterns from catalog */
+  globalBashPatterns(): BashPatternConfig | undefined {
+    return this.catalog.globalBashPatterns;
   }
 
   private pickRestoreMode(cliMode?: string, sessionMode?: string): Mode {

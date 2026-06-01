@@ -7,7 +7,7 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
 import { loadAllModes, notifyModeCatalogDiagnostics, type ModeCatalog } from "./mode-catalog.js";
 import { ModeRuntimeController, type ModeRuntimeDecision } from "./mode-runtime.js";
 import { injectIntoPayload } from "./payload-injection.js";
-import { evaluateToolCall } from "./mode-tool-policy.js";
+import { evaluateToolCall, resolveBashPatterns } from "./mode-tool-policy.js";
 import { ModeFileWatcher } from "./mode-file-watcher.js";
 import type { ModeDefinition } from "./types.js";
 import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE } from "./types.js";
@@ -174,19 +174,45 @@ export class ModeSessionCoordinator {
 
   // --- Hooks ---
 
-  evaluateToolCall(toolName: string, input: unknown): { block: boolean; reason?: string; warning?: string } | undefined {
+  async evaluateToolCall(toolName: string, input: unknown): Promise<{ block: boolean; reason?: string; warning?: string; suggestedModes?: string[] } | undefined> {
     this.runtime?.transition({ type: "tool_call", toolName });
     const mode = this.currentMode();
     const catalogDefs = this.runtime?.catalogDefinitions();
     const availableAgents = this.discoverAvailableAgents();
+    const definition = this.runtime?.definition();
+    
+    // Resolve bash patterns from global + per-mode overrides
+    const globalBashPatterns = this.runtime?.globalBashPatterns();
+    const modeBashPatterns = definition?.bash_patterns;
+    const bashPatterns = resolveBashPatterns(globalBashPatterns, modeBashPatterns);
+    
     const decision = evaluateToolCall({
       mode,
-      definition: this.runtime?.definition(),
+      definition,
       toolName,
       input,
       catalog: catalogDefs,
       availableAgents,
+      bashPatterns,
     });
+
+    // Handle ask action - prompt user for confirmation
+    if (decision.ask) {
+      if (!this.ctx) {
+        return { block: true, reason: `Cannot confirm tool "${toolName}": UI not initialized` };
+      }
+      // Surface config warnings before prompting user
+      if (decision.warning) {
+        this.ctx.ui.notify(decision.warning, "warning");
+      }
+      const message = decision.askMessage ?? `Allow tool "${toolName}" in ${mode.toUpperCase()} mode?`;
+      const confirmed = await this.ctx.ui.confirm("Permission Request", message);
+      if (!confirmed) {
+        return { block: true, reason: `User denied tool: ${toolName}`, warning: decision.warning };
+      }
+      // User confirmed, allow the tool call
+      return { block: false, suggestedModes: decision.suggestedModes, warning: decision.warning };
+    }
 
     if (decision.block && decision.suggestedModes && decision.suggestedModes.length > 0) {
       // Surface warning before early return
@@ -376,6 +402,7 @@ export class ModeSessionCoordinator {
     return [];
   }
 }
+
 export function lastSessionMode(ctx: ExtensionContext): string | undefined {
   const last = ctx.sessionManager.getEntries()
     .filter((e) => e.type === "custom" && e.customType === "mode-state")

@@ -1,6 +1,6 @@
-import { test, expect } from "vitest";
+import { test, expect, vi } from "vitest";
 
-import { evaluateToolCall, findModesForTool } from "../dist/index.js";
+import { evaluateToolCall, findModesForTool, resolveBashPatterns, validateBashPattern } from "../dist/index.js";
 
 function decision(input) {
   return evaluateToolCall(input);
@@ -573,4 +573,485 @@ test("skips availableAgents validation when availableAgents not provided", () =>
   });
   expect(result.block).toBe(false);
   expect(result.warning).toBeUndefined();
+});
+// --- Permission service tests ---
+
+test("permissions deny blocks tool call", () => {
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", permissions: { edit: "deny" } },
+    toolName: "edit",
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/explicitly denies tool: edit/);
+});
+
+test("permissions allow skips enabled_tools check", () => {
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", enabled_tools: ["read"], permissions: { edit: "allow" } },
+    toolName: "edit",
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("permissions allow skips bash policy check", () => {
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", bash_policy: "strict_readonly", permissions: { bash: "allow" } },
+    toolName: "bash",
+    input: { command: "rm -rf dist" },
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("permissions ask returns ask signal", () => {
+  const result = decision({
+    mode: "code",
+    definition: { mode: "code", permissions: { bash: "ask" } },
+    toolName: "bash",
+    input: { command: "rm -rf dist" },
+  });
+
+  expect(result.block).toBe(false);
+  expect(result.ask).toBe(true);
+  expect(result.askMessage).toMatch(/Allow tool "bash"/);
+});
+
+test("permissions takes precedence over enabled_tools", () => {
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", enabled_tools: ["read"], permissions: { bash: "deny" } },
+    toolName: "bash",
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/explicitly denies tool: bash/);
+});
+
+test("missing permissions key falls back to existing behavior", () => {
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", enabled_tools: ["read", "bash"], bash_policy: "strict_readonly" },
+    toolName: "edit",
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/blocks tool: edit/);
+});
+
+test("findModesForTool respects permissions deny", () => {
+  const catalog = new Map([
+    ["plan", { permissions: { edit: "deny" } }],
+    ["code", { permissions: { edit: "allow" } }],
+    ["yolo", {}],
+  ]);
+
+  const result = findModesForTool("edit", catalog);
+
+  expect(result).toContain("code");
+  expect(result).toContain("yolo");
+  expect(result).not.toContain("plan");
+});
+
+test("findModesForTool includes mode with permissions allow", () => {
+  const catalog = new Map([
+    ["plan", { enabled_tools: ["read"] }],
+    ["code", { permissions: { edit: "allow" } }],
+  ]);
+
+  const result = findModesForTool("edit", catalog);
+
+  expect(result).toContain("code");
+  expect(result).not.toContain("plan");
+});
+
+test("findModesForTool includes mode with permissions ask", () => {
+  const catalog = new Map([
+    ["plan", { permissions: { edit: "ask" } }],
+    ["code", {}],
+  ]);
+
+  const result = findModesForTool("edit", catalog);
+
+  expect(result).toContain("plan");
+  expect(result).toContain("code");
+});
+
+test("permissions deny with suggestedModes", () => {
+  const catalog = new Map([
+    ["plan", { permissions: { edit: "deny" } }],
+    ["code", {}],
+    ["yolo", {}],
+  ]);
+
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", permissions: { edit: "deny" } },
+    toolName: "edit",
+    catalog,
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.suggestedModes).toContain("code");
+  expect(result.suggestedModes).toContain("yolo");
+  expect(result.suggestedModes).not.toContain("plan");
+});
+
+test("permissions deny blocks bash command", () => {
+  const result = decision({
+    mode: "code",
+    definition: { mode: "code", permissions: { bash: "deny" } },
+    toolName: "bash",
+    input: { command: "ls -la" },
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/explicitly denies tool: bash/);
+});
+
+test("permissions allow for specific tool does not affect other tools", () => {
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", enabled_tools: ["read"], permissions: { edit: "allow" } },
+    toolName: "write",
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/blocks tool: write/);
+});
+
+// --- Configurable bash policies tests ---
+
+test("resolveBashPatterns returns built-in patterns by default", () => {
+  const patterns = resolveBashPatterns();
+
+  expect(patterns.safe.length).toBeGreaterThan(0);
+  expect(patterns.destructive.length).toBeGreaterThan(0);
+  expect(patterns.safe.some(p => p.test("cat file.txt"))).toBe(true);
+  expect(patterns.destructive.some(p => p.test("rm -rf dist"))).toBe(true);
+});
+
+test("resolveBashPatterns adds custom safe pattern", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    safe: { add: ["^\\s*my_tool\\b"] }
+  });
+
+  expect(patterns.safe.some(p => p.test("my_tool --help"))).toBe(true);
+  expect(patterns.safe.some(p => p.test("cat file.txt"))).toBe(true);
+});
+
+test("resolveBashPatterns adds custom destructive pattern", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { add: ["^\\s*dangerous\\b"] }
+  });
+
+  expect(patterns.destructive.some(p => p.test("dangerous --all"))).toBe(true);
+  expect(patterns.destructive.some(p => p.test("rm -rf dist"))).toBe(true);
+});
+
+test("resolveBashPatterns removes built-in safe pattern", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    safe: { remove: ["^\\s*curl\\b"] }
+  });
+
+  expect(patterns.safe.some(p => p.test("curl https://example.com"))).toBe(false);
+  expect(patterns.safe.some(p => p.test("cat file.txt"))).toBe(true);
+});
+
+test("resolveBashPatterns removes built-in destructive pattern", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { remove: ["\\bsudo\\b"] }
+  });
+
+  expect(patterns.destructive.some(p => p.test("sudo"))).toBe(false);
+  expect(patterns.destructive.some(p => p.test("rm -rf dist"))).toBe(true);
+});
+
+test("resolveBashPatterns merges global and mode overrides", () => {
+  const patterns = resolveBashPatterns(
+    { safe: { add: ["^\\s*global_tool\\b"] } },
+    { safe: { add: ["^\\s*mode_tool\\b"] } }
+  );
+
+  expect(patterns.safe.some(p => p.test("global_tool --help"))).toBe(true);
+  expect(patterns.safe.some(p => p.test("mode_tool --help"))).toBe(true);
+  expect(patterns.safe.some(p => p.test("cat file.txt"))).toBe(true);
+});
+
+test("resolveBashPatterns mode overrides take precedence over global", () => {
+  const patterns = resolveBashPatterns(
+    { destructive: { remove: ["\\bsudo\\b"] } },
+    { destructive: { add: ["\\bsudo\\b"] } }
+  );
+
+  expect(patterns.destructive.some(p => p.test("sudo apt update"))).toBe(true);
+});
+
+test("resolveBashPatterns handles invalid regex gracefully", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    safe: { add: ["[invalid"] }
+  });
+
+  // Should not throw, invalid pattern is skipped
+  expect(patterns.safe.some(p => p.test("cat file.txt"))).toBe(true);
+});
+
+test("validateBashPattern returns valid for correct regex", () => {
+  const result = validateBashPattern("^\\s*test\\b");
+  expect(result.valid).toBe(true);
+  expect(result.error).toBeUndefined();
+});
+
+test("validateBashPattern returns error for invalid regex", () => {
+  const result = validateBashPattern("[invalid");
+  expect(result.valid).toBe(false);
+  expect(result.error).toMatch(/Invalid regex/);
+});
+
+test("custom safe pattern passes strict_readonly policy", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    safe: { add: ["^\\s*npm\\s+test\\b"] }
+  });
+
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", bash_policy: "strict_readonly" },
+    toolName: "bash",
+    input: { command: "npm test" },
+    bashPatterns: patterns,
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("custom destructive pattern blocks non_destructive policy", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { add: ["^\\s*dangerous\\b"] }
+  });
+
+  const result = decision({
+    mode: "code",
+    definition: { mode: "code", bash_policy: "non_destructive" },
+    toolName: "bash",
+    input: { command: "dangerous --all" },
+    bashPatterns: patterns,
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/blocked destructive command/);
+});
+
+test("remove built-in safe pattern blocks command in strict_readonly", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    safe: { remove: ["^\\s*cat\\b"] }
+  });
+
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", bash_policy: "strict_readonly" },
+    toolName: "bash",
+    input: { command: "cat file.txt" },
+    bashPatterns: patterns,
+  });
+
+  expect(result.block).toBe(true);
+  expect(result.reason).toMatch(/blocked unsafe command/);
+});
+
+test("remove built-in destructive pattern allows command in non_destructive", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { remove: ["\\brm\\b"] }
+  });
+
+  const result = decision({
+    mode: "code",
+    definition: { mode: "code", bash_policy: "non_destructive" },
+    toolName: "bash",
+    input: { command: "rm -rf dist" },
+    bashPatterns: patterns,
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("global overrides applied before mode overrides", () => {
+  const patterns = resolveBashPatterns(
+    { safe: { add: ["^\\s*global_tool\\b"] } },
+    { safe: { add: ["^\\s*mode_tool\\b"] } }
+  );
+
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", bash_policy: "strict_readonly" },
+    toolName: "bash",
+    input: { command: "global_tool --help" },
+    bashPatterns: patterns,
+  });
+
+  expect(result.block).toBe(false);
+});
+
+test("mode overrides can remove patterns added by global", () => {
+  const patterns = resolveBashPatterns(
+    { safe: { add: ["^\\s*global_tool\\b"] } },
+    { safe: { remove: ["^\\s*global_tool\\b"] } }
+  );
+
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", bash_policy: "strict_readonly" },
+    toolName: "bash",
+    input: { command: "global_tool --help" },
+    bashPatterns: patterns,
+  });
+
+  expect(result.block).toBe(true);
+
+});
+
+test("resolveBashPatterns logs warning for invalid regex in safe.add", () => {
+  const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const result = resolveBashPatterns(undefined, {
+    safe: { add: ["[invalid(regex"] }
+  });
+  expect(result.safe.length).toBeGreaterThan(0);
+  expect(consoleSpy).toHaveBeenCalled();
+  consoleSpy.mockRestore();
+});
+
+test("resolveBashPatterns logs warning for invalid regex in destructive.add", () => {
+  const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const result = resolveBashPatterns(undefined, {
+    destructive: { add: ["(unclosed"] }
+  });
+  expect(result.destructive.length).toBeGreaterThan(0);
+  expect(consoleSpy).toHaveBeenCalled();
+  consoleSpy.mockRestore();
+});
+
+// --- findModesForTool bashPatterns consistency (TDD red) ---
+
+test("findModesForTool respects custom bashPatterns for strict_readonly", () => {
+  const catalog = new Map([
+    ["plan", { bash_policy: "strict_readonly" }],
+    ["code", { bash_policy: "non_destructive" }],
+  ]);
+
+  // "npm test" is NOT in built-in safe patterns, so plan would reject it.
+  // Add it as custom safe pattern — findModesForTool should now include plan.
+  const patterns = resolveBashPatterns(undefined, {
+    safe: { add: ["^\\s*npm\\s+test\\b"] }
+  });
+
+  const result = findModesForTool("bash", catalog, { command: "npm test" }, patterns);
+
+  expect(result).toContain("plan");
+  expect(result).toContain("code");
+});
+
+test("findModesForTool respects custom bashPatterns for non_destructive", () => {
+  const catalog = new Map([
+    ["plan", { bash_policy: "strict_readonly" }],
+    ["code", { bash_policy: "non_destructive" }],
+  ]);
+
+  // "custom_deploy" is not in built-in destructive patterns, so code would allow it.
+  // Add it as custom destructive pattern — findModesForTool should now exclude code.
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { add: ["^\\s*custom_deploy\\b"] }
+  });
+
+  const result = findModesForTool("bash", catalog, { command: "custom_deploy --prod" }, patterns);
+
+  expect(result).not.toContain("code");
+  expect(result).not.toContain("plan"); // rm-like not safe either
+});
+
+test("findModesForTool falls back to built-in patterns when bashPatterns omitted", () => {
+  const catalog = new Map([
+    ["plan", { bash_policy: "strict_readonly" }],
+    ["code", { bash_policy: "non_destructive" }],
+  ]);
+
+  // "npm test" not in built-in safe patterns → plan should reject
+  const result = findModesForTool("bash", catalog, { command: "npm test" });
+
+  expect(result).not.toContain("plan");
+  expect(result).toContain("code");
+});
+
+// --- Nested-quantifier detection (TDD red) ---
+
+test("resolveBashPatterns rejects nested-quantifier patterns (ReDoS risk)", () => {
+  const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  // Nested quantifier: (a+)+ or (a*)* etc
+  const patterns = resolveBashPatterns(undefined, {
+    safe: { add: ["(a+)+"] }
+  });
+
+  // Should be skipped — pattern not added
+  expect(patterns.safe.some(p => p.source === "(a+)+")).toBe(false);
+  expect(consoleSpy).toHaveBeenCalled();
+  expect(consoleSpy.mock.calls.some(c => String(c[0]).includes("ReDoS") || String(c[0]).includes("nested quantifier"))).toBe(true);
+
+  consoleSpy.mockRestore();
+});
+
+test("resolveBashPatterns rejects (a*)* nested quantifier", () => {
+  const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { add: ["(b*)*c"] }
+  });
+
+  expect(patterns.destructive.some(p => p.source === "(b*)*c")).toBe(false);
+  expect(consoleSpy).toHaveBeenCalled();
+
+  consoleSpy.mockRestore();
+});
+
+test("resolveBashPatterns allows safe patterns with quantifiers (no nesting)", () => {
+  // Quantifier outside group — not nested, should be fine
+  const patterns = resolveBashPatterns(undefined, {
+    safe: { add: ["^\\s*foo\\s+bar.*"] }
+  });
+
+  expect(patterns.safe.some(p => p.test("foo bar baz"))).toBe(true);
+});
+
+// --- Finding 1: permissions.allow + bash_policy conflict warning (TDD red) ---
+
+test("permissions.allow with bash_policy emits warning about precedence", () => {
+  // When permissions: { bash: "allow" } AND bash_policy: "strict_readonly" are both set,
+  // "allow" silently bypasses bash_policy with no warning to the user.
+  // This test asserts a warning should be emitted explaining the precedence.
+  const result = decision({
+    mode: "plan",
+    definition: { mode: "plan", bash_policy: "strict_readonly", permissions: { bash: "allow" } },
+    toolName: "bash",
+    input: { command: "rm -rf dist" },
+  });
+
+  // permissions.allow currently lets the command through (block: false)
+  expect(result.block).toBe(false);
+  // BUG: no warning is emitted about bash_policy being bypassed
+  expect(result.warning).toBeDefined();
+  expect(result.warning).toMatch(/bash_policy|precedence/);
+});
+
+// --- Finding 4: ReDoS alternation-based limitation (documenting current behavior) ---
+
+test("validateBashPattern accepts alternation-based ReDoS patterns (known limitation)", () => {
+  // TODO: REDOS_PATTERN heuristic only catches nested quantifiers like (a+)+.
+  // Alternation-based ReDoS like (a|aa)+ passes detection because there are no
+  // nested quantifiers — the quantifier is on the group, not inside it.
+  // This is a known limitation; future hardening should use a proper ReDoS detector
+  // (e.g. safe-regex, recheck) to catch alternation catastrophic backtracking.
+  const result = validateBashPattern("(a|aa)+");
+  expect(result.valid).toBe(true);
 });
