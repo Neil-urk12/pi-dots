@@ -44,11 +44,13 @@ export default async function (pi: ExtensionAPI) {
   // Shortcut: cycle mode
   pi.registerShortcut(Key.ctrlShift("m"), {
     description: "Cycle modes (yolo → plan → code → ask → orchestrator)",
-    handler: async () => coordinator.cycleMode(),
+    handler: async () => { coordinator.cycleMode(); },
   });
 
   // Tool: request_mode_switch — allows agent to switch modes when blocked
-  pi.registerTool("request_mode_switch", {
+  pi.registerTool({
+    name: "request_mode_switch",
+    label: "Switch Mode",
     description: "Switch to a different agent mode. Use this when a tool call is blocked and the error message suggests switching modes.",
     parameters: {
       type: "object",
@@ -60,12 +62,12 @@ export default async function (pi: ExtensionAPI) {
       },
       required: ["mode"],
     },
-    handler: async (input: { mode: string }) => {
-      const result = coordinator.switchMode(input.mode);
+    async execute(_toolCallId: string, params: { mode: string }) {
+      const result = coordinator.switchMode(params.mode);
       if (result.ok) {
-        return { success: true, mode: result.mode, message: `Switched to ${result.mode} mode. You can now retry your previous tool call.` };
+        return { content: [{ type: "text" as const, text: `Switched to ${result.mode} mode. You can now retry your previous tool call.` }], details: undefined };
       }
-      return { success: false, error: result.error };
+      return { content: [{ type: "text" as const, text: `Failed to switch mode: ${result.error}` }], details: undefined, isError: true };
     },
   });
 

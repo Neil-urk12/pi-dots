@@ -10,8 +10,9 @@ import { injectIntoPayload } from "./payload-injection.js";
 import { evaluateToolCall } from "./mode-tool-policy.js";
 import { ModeFileWatcher } from "./mode-file-watcher.js";
 import type { ModeDefinition } from "./types.js";
+import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE } from "./types.js";
 
-export type Mode = string;
+import type { Mode } from "./types.js";
 
 export interface ModeSelectOption {
   name: string;
@@ -30,7 +31,7 @@ export class ModeSessionCoordinator {
   ) {
     this.fileWatcher = new ModeFileWatcher(
       path.join(baseDir, "..", "modes"),
-      path.join(os.homedir(), ".pi", "modes", "config.yaml"),
+      path.join(os.homedir(), USER_CONFIG_DIR, USER_CONFIG_FILE),
     );
   }
 
@@ -147,7 +148,7 @@ export class ModeSessionCoordinator {
     const selectedName = await selectMode(options);
     if (!selectedName) return undefined;
 
-    const mode = modes.find(m => m.toLowerCase() === selectedName) || "yolo";
+    const mode = modes.find(m => m.toLowerCase() === selectedName) || PICKER_FALLBACK_MODE;
     const decision = this.runtime.transition({ type: "mode_select", requestedMode: mode });
     if (!decision.error) {
       this.applyDecision(decision);
@@ -219,7 +220,7 @@ export class ModeSessionCoordinator {
   // --- State ---
 
   currentMode(): Mode {
-    return this.runtime?.snapshot().currentMode ?? "yolo";
+    return this.runtime?.snapshot().currentMode ?? PICKER_FALLBACK_MODE;
   }
 
   currentDefinition(): ModeDefinition | undefined {
@@ -273,7 +274,7 @@ export class ModeSessionCoordinator {
   // targetMode is validated against catalog.definitions inside runtime.transition
   switchMode(targetMode: string): { ok: boolean; mode?: string; error?: string } {
     if (!this.runtime) return { ok: false, error: "Mode catalog not initialized" };
-    if (!targetMode || typeof targetMode !== "string" || targetMode.length > 50) return { ok: false, error: "Invalid mode name" };
+    if (!targetMode || typeof targetMode !== "string" || targetMode.length > MAX_MODE_NAME_LENGTH) return { ok: false, error: "Invalid mode name" };
     const decision = this.runtime.transition({ type: "mode_select", requestedMode: targetMode });
     if (decision.error) return { ok: false, error: decision.error };
     this.applyDecision(decision);
@@ -319,7 +320,7 @@ export class ModeSessionCoordinator {
     const def = this.currentDefinition();
     const allTools = this.pi.getAllTools().map(t => t.name);
     const activeTools = this.runtime?.activeTools() ?? allTools;
-    const suffixPreview = (def?.prompt_suffix || "").slice(0, 120) + (def?.prompt_suffix && def.prompt_suffix.length > 120 ? "..." : "");
+    const suffixPreview = (def?.prompt_suffix || "").slice(0, SUFFIX_PREVIEW_LENGTH) + (def?.prompt_suffix && def.prompt_suffix.length > SUFFIX_PREVIEW_LENGTH ? "..." : "");
 
     const status = `Mode: ${mode}\nDescription: ${def?.description || "—"}\nActive tools (${activeTools.length}): ${activeTools.join(", ")}\nPrompt suffix: ${suffixPreview || "(none)"}\nBorder: ${def?.border_label || ""} (style: ${def?.border_style || "—"})`;
     this.ctx.ui.notify(status, "info");
@@ -330,7 +331,7 @@ export function lastSessionMode(ctx: ExtensionContext): string | undefined {
   const last = ctx.sessionManager.getEntries()
     .filter((e) => e.type === "custom" && e.customType === "mode-state")
     .pop();
-  if (last && "data" in last && last.data && typeof last.data === "object" && "mode" in last.data) {
+  if (last && "data" in last && last.data && typeof last.data === "object" && "mode" in last.data && typeof (last.data as { mode: unknown }).mode === "string") {
     return (last.data as { mode: string }).mode;
   }
   return undefined;

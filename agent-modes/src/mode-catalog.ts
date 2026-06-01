@@ -1,7 +1,14 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import type { ModeDefinition } from "./types.js";
+import { USER_CONFIG_DIR, USER_CONFIG_FILE, errorMessage, errorCode } from "./types.js";
 
 export const REQUIRED_BUILT_IN_MODES = ["yolo", "plan", "code", "ask", "orchestrator"] as const;
+
+let _fs: typeof import("node:fs").promises | undefined;
+async function getFs() { return (_fs ??= (await import("node:fs")).promises); }
+
+let _yaml: typeof import("js-yaml").default | undefined;
+async function getYaml() { return (_yaml ??= (await import("js-yaml")).default); }
 
 export type DiagnosticLevel = "warning" | "error";
 
@@ -53,41 +60,47 @@ function diagnostic(level: DiagnosticLevel, message: string, extras: Partial<Mod
   return { level, message, ...extras };
 }
 
-function validateModeDefinition(parsed: any, expectedMode: string, file: string): ModeDefinition {
+const VALID_MODE_NAME = /^[a-z0-9_-]+$/;
+
+function validateModeDefinition(parsed: unknown, expectedMode: string, file: string): ModeDefinition {
   if (!parsed || typeof parsed !== "object") {
     throw new Error("YAML frontmatter must be an object");
   }
-  if (parsed.mode !== expectedMode) {
-    throw new Error(`Mode field '${parsed.mode}' does not match filename '${expectedMode}'`);
+  const input = parsed as Record<string, unknown>;
+  if (input.mode !== expectedMode) {
+    throw new Error(`Mode field '${input.mode}' does not match filename '${expectedMode}'`);
   }
-  if (parsed.enabled_tools !== undefined) {
-    if (!Array.isArray(parsed.enabled_tools)) {
+  if (!VALID_MODE_NAME.test(String(input.mode))) {
+    throw new Error(`Invalid mode name '${input.mode}' — must be lowercase alphanumeric with hyphens/underscores`);
+  }
+  if (input.enabled_tools !== undefined) {
+    if (!Array.isArray(input.enabled_tools)) {
       throw new Error("enabled_tools must be an array when present");
     }
-    if (!parsed.enabled_tools.every((tool: unknown) => typeof tool === "string")) {
+    if (!input.enabled_tools.every((tool: unknown) => typeof tool === "string")) {
       throw new Error("enabled_tools must contain only strings");
     }
   }
-  if (parsed.bash_policy !== undefined && !["strict_readonly", "non_destructive", "off"].includes(parsed.bash_policy)) {
+  if (input.bash_policy !== undefined && !["strict_readonly", "non_destructive", "off"].includes(String(input.bash_policy))) {
     throw new Error("bash_policy must be one of strict_readonly, non_destructive, off");
   }
-  if (parsed.border_style !== undefined && !["accent", "warning", "success", "muted"].includes(parsed.border_style)) {
+  if (input.border_style !== undefined && !["accent", "warning", "success", "muted"].includes(String(input.border_style))) {
     throw new Error("border_style must be one of accent, warning, success, muted");
   }
   return {
-    mode: parsed.mode,
-    enabled_tools: parsed.enabled_tools,
-    bash_policy: parsed.bash_policy,
-    prompt_suffix: parsed.prompt_suffix,
-    description: parsed.description,
-    border_label: parsed.border_label,
-    border_style: parsed.border_style,
+    mode: String(input.mode),
+    enabled_tools: input.enabled_tools as string[] | undefined,
+    bash_policy: input.bash_policy as ModeDefinition["bash_policy"],
+    prompt_suffix: typeof input.prompt_suffix === "string" ? input.prompt_suffix : undefined,
+    description: typeof input.description === "string" ? input.description : undefined,
+    border_label: typeof input.border_label === "string" ? input.border_label : undefined,
+    border_style: input.border_style as ModeDefinition["border_style"],
   };
 }
 
 async function parseModeDocumentFromMarkdown(filePath: string, mode: string): Promise<ParsedModeDocument> {
-  const fs = (await import("fs")).promises;
-  const yaml = (await import("js-yaml")).default;
+  const fs = await getFs();
+  const yaml = await getYaml();
 
   try {
     const raw = await fs.readFile(filePath, "utf-8");
@@ -96,8 +109,8 @@ async function parseModeDocumentFromMarkdown(filePath: string, mode: string): Pr
       throw new Error("No YAML frontmatter found");
     }
     return { mode, file: filePath, parsed: yaml.load(frontmatterMatch[1], { json: true }) };
-  } catch (err: any) {
-    return { mode, file: filePath, error: err.message };
+  } catch (err: unknown) {
+    return { mode, file: filePath, error: errorMessage(err) };
   }
 }
 
@@ -108,33 +121,33 @@ export async function loadModeFromMarkdown(filePath: string, mode: string): Prom
 }
 
 async function listMarkdownModes(modesDir: string, diagnostics: ModeCatalogDiagnostic[]): Promise<Set<string>> {
-  const fs = (await import("fs")).promises;
+  const fs = await getFs();
   const modes = new Set<string>(REQUIRED_BUILT_IN_MODES);
   try {
     const files = await fs.readdir(modesDir);
     for (const file of files) {
       if (file.endsWith(".md")) modes.add(file.replace(/\.md$/, ""));
     }
-  } catch (err: any) {
-    diagnostics.push(diagnostic("error", `Modes directory read error: ${err.message}`, { file: modesDir }));
+  } catch (err: unknown) {
+    diagnostics.push(diagnostic("error", `Modes directory read error: ${errorMessage(err)}`, { file: modesDir }));
   }
   return modes;
 }
 
 async function parseUserOverrides(userConfigPath: string): Promise<ParsedUserOverrides | undefined> {
-  const fs = (await import("fs")).promises;
-  const yaml = (await import("js-yaml")).default;
+  const fs = await getFs();
+  const yaml = await getYaml();
 
   try {
     const raw = await fs.readFile(userConfigPath, "utf-8");
     try {
       return { file: userConfigPath, parsed: yaml.load(raw, { json: true }) };
-    } catch (err: any) {
-      return { file: userConfigPath, parseError: err.message };
+    } catch (err: unknown) {
+      return { file: userConfigPath, parseError: errorMessage(err) };
     }
-  } catch (err: any) {
-    if (err.code === "ENOENT") return undefined;
-    return { file: userConfigPath, readError: err.message };
+  } catch (err: unknown) {
+    if (errorCode(err) === "ENOENT") return undefined;
+    return { file: userConfigPath, readError: errorMessage(err) };
   }
 }
 
@@ -166,7 +179,12 @@ function applyUserOverrides(
       diagnostics.push(diagnostic("warning", `User override for '${mode}' must be an object`, { mode, file: userOverrides.file }));
       continue;
     }
-    definitions.set(mode, { ...definitions.get(mode)!, ...(overrides as object), mode });
+    const allowedKeys: (keyof ModeDefinition)[] = ["enabled_tools", "bash_policy", "prompt_suffix", "description", "border_label", "border_style"];
+    const filtered: Record<string, unknown> = {};
+    for (const key of allowedKeys) {
+      if (key in overrides) filtered[key] = (overrides as Record<string, unknown>)[key];
+    }
+    definitions.set(mode, { ...definitions.get(mode)!, ...filtered, mode });
   }
 }
 
@@ -184,9 +202,9 @@ export function buildModeCatalog(input: BuildModeCatalogInput): ModeCatalogResul
 
     try {
       definitions.set(document.mode, validateModeDefinition(document.parsed, document.mode, document.file));
-    } catch (err: any) {
+    } catch (err: unknown) {
       const required = (REQUIRED_BUILT_IN_MODES as readonly string[]).includes(document.mode);
-      diagnostics.push(diagnostic(required ? "error" : "warning", `Mode '${document.mode}' load error: ${err.message}`, { mode: document.mode, file: document.file }));
+      diagnostics.push(diagnostic(required ? "error" : "warning", `Mode '${document.mode}' load error: ${errorMessage(err)}`, { mode: document.mode, file: document.file }));
     }
   }
 
@@ -215,7 +233,7 @@ export async function loadAllModes(options: LoadModeCatalogOptions = {}): Promis
   const { fileURLToPath } = await import("url");
   const baseDir = path.dirname(fileURLToPath(import.meta.url));
   const modesDir = options.modesDir ?? path.join(baseDir, "..", "modes");
-  const userConfigPath = options.userConfigPath ?? path.join(os.homedir(), ".pi", "modes", "config.yaml");
+  const userConfigPath = options.userConfigPath ?? path.join(os.homedir(), USER_CONFIG_DIR, USER_CONFIG_FILE);
   const diagnostics: ModeCatalogDiagnostic[] = [];
 
   const modesToLoad = await listMarkdownModes(modesDir, diagnostics);

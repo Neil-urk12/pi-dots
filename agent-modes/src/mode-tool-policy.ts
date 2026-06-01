@@ -1,6 +1,6 @@
 import type { BashPolicy, ModeDefinition } from "./types.js";
 
-export type ModeCatalogMap = Map<string, { enabled_tools?: string[]; bash_policy?: string }>;
+export type ModeCatalogMap = Map<string, { enabled_tools?: string[]; bash_policy?: BashPolicy }>;
 export interface ModeToolPolicyInput {
   mode: string;
   definition?: ModeDefinition;
@@ -37,7 +37,7 @@ export function findModesForTool(
     // For bash, also check bash_policy
     if (toolName === "bash") {
       const command = commandFromInput(input);
-      const policy = def.bash_policy as BashPolicy | undefined;
+      const policy = def.bash_policy;
       const resolvedPolicy = policy ?? resolveDefaultBashPolicy(mode);
 
       if (resolvedPolicy === "strict_readonly" && !isSafeCommand(command)) {
@@ -58,7 +58,7 @@ function resolveDefaultBashPolicy(mode: string): BashPolicy {
   const normalized = mode.trim().toLowerCase();
   if (normalized === "plan" || normalized === "ask") return "strict_readonly";
   if (normalized === "code") return "non_destructive";
-  return "off";
+  return "strict_readonly";
 }
 
 const FAIL_CLOSED_READ_ONLY_TOOLS = new Set([
