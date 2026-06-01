@@ -32,6 +32,7 @@ export interface ModeDefinition {
   allowed_agents?: string[];    // subagent names allowed for delegation; undefined or empty = any agent
   permissions?: Record<string, PermissionAction>; // per-tool permission actions
   bash_patterns?: BashPatternConfig; // custom bash command patterns
+  auto_mode_switch?: boolean;       // if true, skip confirmation for request_mode_switch tool
 }
 
 /** Canonical mode name type */

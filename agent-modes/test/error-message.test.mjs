@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { errorMessage } from "../dist/types.js";
+import { errorMessage } from "../dist/index.js";
 
 describe("errorMessage", () => {
   it("extracts message from Error", () => {

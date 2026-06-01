@@ -14,6 +14,9 @@ import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER
 
 import type { Mode } from "./types.js";
 
+/** Max one-shot bypass entries per session (prevents unbounded growth). */
+const MAX_BYPASS_SIZE = 100;
+
 /** Typed interface for the subagent extension's global bridge. */
 interface SubagentBridge {
   getAgents(): (string | { name: string })[];
@@ -24,11 +27,26 @@ export interface ModeSelectOption {
   description?: string;
 }
 
+/** Generate a unique key for a tool call to support one-shot bypasses. */
+function makeBypassKey(toolName: string, input: unknown): string {
+  let args = "";
+  if (input && typeof input === "object") {
+    try {
+      args = JSON.stringify(input, Object.keys(input as Record<string, unknown>).sort());
+    } catch {
+      args = "<unserializable>";
+    }
+  }
+  return `${toolName}:${args}`;
+}
+
 export class ModeSessionCoordinator {
   private runtime: ModeRuntimeController | undefined;
   private readonly fileWatcher: ModeFileWatcher;
   private reloadPending = false;
   private ctx: ExtensionContext | undefined;
+  private _sessionId: string | undefined;
+  private readonly _oneShotBypasses = new Set<string>();
 
   constructor(
     private readonly pi: ExtensionAPI,
@@ -40,13 +58,18 @@ export class ModeSessionCoordinator {
     );
   }
 
-  async initialize(ctx: ExtensionContext): Promise<void> {
+  async initialize(ctx: ExtensionContext, sessionId?: string): Promise<void> {
     this.ctx = ctx;
+    this._sessionId = sessionId;
+    this._oneShotBypasses.clear();
     const catalog = await this.loadCatalog(ctx);
     if (catalog) {
-      if (!this.runtime) this.runtime = new ModeRuntimeController(catalog);
-      else this.runtime.acceptCatalog(catalog);
+      this.runtime = new ModeRuntimeController(catalog);
     }
+  }
+
+  get sessionId(): string | undefined {
+    return this._sessionId;
   }
 
   private async loadCatalog(ctx?: ExtensionContext): Promise<ModeCatalog | undefined> {
@@ -59,8 +82,6 @@ export class ModeSessionCoordinator {
     console.error("[pi-agent-modes] Failed to load required mode definitions", result.diagnostics);
     return undefined;
   }
-
-  // --- Session lifecycle ---
 
   restoreMode(cliFlag?: string, sessionMode?: string): ModeRuntimeDecision | undefined {
     const decision = this.runtime?.transition({
@@ -75,8 +96,6 @@ export class ModeSessionCoordinator {
   captureBaselineTools(): void {
     this.runtime?.captureBaselineTools(this.pi.getAllTools().map((t) => t.name));
   }
-
-  // --- Reload ---
 
   async reload(): Promise<void> {
     if (!this.ctx) return;
@@ -111,8 +130,6 @@ export class ModeSessionCoordinator {
     }
   }
 
-  // --- Commands ---
-
   async handleCommand(
     args: string | undefined,
     selectMode: (options: ModeSelectOption[]) => Promise<string | undefined>,
@@ -144,7 +161,6 @@ export class ModeSessionCoordinator {
       return decision;
     }
 
-    // Interactive picker
     const modes = this.modes();
     const options: ModeSelectOption[] = modes.map(m => ({
       name: m,
@@ -172,16 +188,20 @@ export class ModeSessionCoordinator {
     return decision;
   }
 
-  // --- Hooks ---
-
   async evaluateToolCall(toolName: string, input: unknown): Promise<{ block: boolean; reason?: string; warning?: string; suggestedModes?: string[] } | undefined> {
     this.runtime?.transition({ type: "tool_call", toolName });
     const mode = this.currentMode();
     const catalogDefs = this.runtime?.catalogDefinitions();
     const availableAgents = this.discoverAvailableAgents();
     const definition = this.runtime?.definition();
+
+    // Check one-shot bypass: if user previously allowed this exact tool call, let it through
+    const bypassKey = makeBypassKey(toolName, input);
+    if (this._oneShotBypasses.has(bypassKey)) {
+      this._oneShotBypasses.delete(bypassKey);
+      return { block: false };
+    }
     
-    // Resolve bash patterns from global + per-mode overrides
     const globalBashPatterns = this.runtime?.globalBashPatterns();
     const modeBashPatterns = definition?.bash_patterns;
     const bashPatterns = resolveBashPatterns(globalBashPatterns, modeBashPatterns);
@@ -201,7 +221,6 @@ export class ModeSessionCoordinator {
       if (!this.ctx) {
         return { block: true, reason: `Cannot confirm tool "${toolName}": UI not initialized` };
       }
-      // Surface config warnings before prompting user
       if (decision.warning) {
         this.ctx.ui.notify(decision.warning, "warning");
       }
@@ -210,24 +229,63 @@ export class ModeSessionCoordinator {
       if (!confirmed) {
         return { block: true, reason: `User denied tool: ${toolName}`, warning: decision.warning };
       }
-      // User confirmed, allow the tool call
       return { block: false, suggestedModes: decision.suggestedModes, warning: decision.warning };
     }
 
     if (decision.block && decision.suggestedModes && decision.suggestedModes.length > 0) {
-      // Surface warning before early return
       if (decision.warning) {
         this.ctx?.ui.notify(decision.warning, "warning");
       }
+
+      if (!this.ctx) {
+        const suggestions = decision.suggestedModes.join(", ");
+        return {
+          block: true,
+          reason: `${decision.reason}\n\nTo use this tool, switch to: ${suggestions}. Call request_mode_switch({ mode: "<mode>" }).`,
+          warning: decision.warning,
+        };
+      }
+
+      // Show 3-option dialog: Allow once, Switch mode, Deny
       const suggestions = decision.suggestedModes.join(", ");
-      return {
-        block: true,
-        reason: `${decision.reason}\n\nTo use this tool, switch to: ${suggestions}. Call request_mode_switch({ mode: "<mode>" }).`,
-        warning: decision.warning,
-      };
+      const labels = [
+        `Allow once — run "${toolName}" this time without switching mode`,
+        `Switch mode — change to ${suggestions} (permanent until changed)`,
+        "Deny — block this tool call",
+      ];
+      const choice = await this.ctx.ui.select("Tool blocked by mode policy", labels);
+
+      if (!choice || choice.startsWith("Deny")) {
+        return {
+          block: true,
+          reason: `${decision.reason}\n\nTo use this tool, switch to: ${suggestions}. Call request_mode_switch({ mode: "<mode>" }).`,
+          warning: decision.warning,
+        };
+      }
+
+      if (choice.startsWith("Allow once")) {
+        if (this._oneShotBypasses.size >= MAX_BYPASS_SIZE) {
+          const oldest = this._oneShotBypasses.values().next().value;
+          if (oldest) this._oneShotBypasses.delete(oldest);
+        }
+        this._oneShotBypasses.add(bypassKey);
+        this.ctx.ui.notify(`Allowed "${toolName}" once`, "info");
+        return { block: false, warning: decision.warning };
+      }
+
+      if (choice.startsWith("Switch mode")) {
+        const switchResult = this.switchMode(decision.suggestedModes![0]);
+        if (switchResult.ok) {
+          return { block: false, warning: decision.warning };
+        }
+        return {
+          block: true,
+          reason: `Mode switch failed: ${switchResult.error}. ${decision.reason}`,
+          warning: decision.warning,
+        };
+      }
     }
 
-    // Surface non-blocking config warnings to user
     if (decision.warning) {
       this.ctx?.ui.notify(decision.warning, "warning");
     }
@@ -240,14 +298,12 @@ export class ModeSessionCoordinator {
     const promptSuffix = this.runtime?.currentPromptSuffix();
     const base = promptSuffix ? `\n\n[MODE: ${mode.toUpperCase()}]\n${promptSuffix}` : `\n\n[MODE: ${mode.toUpperCase()}]`;
 
-    // Skip GUARD hint for unrestricted modes (no tool restrictions)
     const definition = this.runtime?.definition();
     const hasRestrictions = (definition?.enabled_tools && definition.enabled_tools.length > 0) || (definition?.bash_policy && definition.bash_policy !== "off");
     if (!hasRestrictions) return promptSuffix ? base : undefined;
 
     let injection = base;
 
-    // Append available agents for delegation modes
     if (mode === "orchestrator" || (definition?.allowed_agents && definition.allowed_agents.length > 0)) {
       const available = this.discoverAvailableAgents();
       const allowed = definition?.allowed_agents;
@@ -270,11 +326,10 @@ export class ModeSessionCoordinator {
   }
 
   turnEnd(): void {
+    if (!this._sessionId) return;
     const decision = this.runtime?.transition({ type: "turn_end" });
     this.applyDecision(decision);
   }
-
-  // --- State ---
 
   currentMode(): Mode {
     return this.runtime?.snapshot().currentMode ?? PICKER_FALLBACK_MODE;
@@ -287,8 +342,6 @@ export class ModeSessionCoordinator {
   modes(): Mode[] {
     return this.runtime?.modes() ?? [];
   }
-
-  // --- UI ---
 
   setupEditor(): void {
     if (!this.ctx) return;
@@ -324,11 +377,6 @@ export class ModeSessionCoordinator {
     });
   }
 
-  /**
-   * Switch to a target mode programmatically (used by request_mode_switch tool).
-   * Returns success with new mode name, or error message.
-   */
-  // targetMode is validated against catalog.definitions inside runtime.transition
   switchMode(targetMode: string): { ok: boolean; mode?: string; error?: string } {
     if (!this.runtime) return { ok: false, error: "Mode catalog not initialized" };
     if (!targetMode || typeof targetMode !== "string" || targetMode.length > MAX_MODE_NAME_LENGTH) return { ok: false, error: "Invalid mode name" };
@@ -339,8 +387,6 @@ export class ModeSessionCoordinator {
     if (decision.modeChanged && this.ctx) this.ctx.ui.notify(`Mode switched: ${this.currentMode().toUpperCase()}`, "info");
     return { ok: true, mode: this.currentMode() };
   }
-
-  // --- Private ---
 
   private applyDecision(decision: ModeRuntimeDecision | undefined): void {
     if (!decision) return;
@@ -354,7 +400,7 @@ export class ModeSessionCoordinator {
   }
 
   private persistMode(): void {
-    this.pi.appendEntry("mode-state", { mode: this.currentMode() });
+    this.pi.appendEntry("mode-state", { mode: this.currentMode(), sessionId: this._sessionId });
   }
 
   private updateStatus(): void {
@@ -383,10 +429,6 @@ export class ModeSessionCoordinator {
     this.ctx.ui.notify(status, "info");
   }
 
-  /**
-   * Discover available subagent names from the subagent extension's global bridge.
-   * Returns empty array if the bridge is not present.
-   */
   private discoverAvailableAgents(): string[] {
     try {
       const bridge = (globalThis as Record<string, unknown>).__pi_subagents as SubagentBridge | undefined;
@@ -397,16 +439,28 @@ export class ModeSessionCoordinator {
         }
       }
     } catch {
-      // bridge not available — that's fine
+      // bridge not available
     }
     return [];
   }
 }
 
-export function lastSessionMode(ctx: ExtensionContext): string | undefined {
-  const last = ctx.sessionManager.getEntries()
-    .filter((e) => e.type === "custom" && e.customType === "mode-state")
-    .pop();
+export function lastSessionMode(ctx: ExtensionContext, sessionId?: string): string | undefined {
+  const entries = ctx.sessionManager.getEntries()
+    .filter((e) => e.type === "custom" && e.customType === "mode-state");
+  
+  if (sessionId) {
+    const sessionEntries = entries.filter((e) => 
+      "data" in e && e.data && typeof e.data === "object" && 
+      "sessionId" in e.data && (e.data as { sessionId: unknown }).sessionId === sessionId
+    );
+    const sessionEntry = sessionEntries[sessionEntries.length - 1];
+    if (sessionEntry && "data" in sessionEntry && sessionEntry.data && typeof sessionEntry.data === "object" && "mode" in sessionEntry.data && typeof (sessionEntry.data as { mode: unknown }).mode === "string") {
+      return (sessionEntry.data as { mode: string }).mode;
+    }
+  }
+  
+  const last = entries.pop();
   if (last && "data" in last && last.data && typeof last.data === "object" && "mode" in last.data && typeof (last.data as { mode: unknown }).mode === "string") {
     return (last.data as { mode: string }).mode;
   }

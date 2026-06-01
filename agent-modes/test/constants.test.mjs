@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_MODE, SAFE_FALLBACK_MODES, PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH } from "../dist/types.js";
+import { DEFAULT_MODE, SAFE_FALLBACK_MODES, PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH } from "../dist/index.js";
 
 describe("shared constants", () => {
   it("DEFAULT_MODE is orchestrator", () => { expect(DEFAULT_MODE).toBe("orchestrator"); });

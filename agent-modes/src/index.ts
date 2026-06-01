@@ -10,6 +10,7 @@ export { ModeRuntimeController } from "./mode-runtime.js";
 export { ModeSessionCoordinator, lastSessionMode } from "./mode-session-coordinator.js";
 export { evaluateToolCall, findModesForTool, resolveBashPatterns, validateBashPattern } from "./mode-tool-policy.js";
 export { injectIntoPayload } from "./payload-injection.js";
+export { DEFAULT_MODE, SAFE_FALLBACK_MODES, PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE, errorMessage, errorCode } from "./types.js";
 
 export default async function (pi: ExtensionAPI) {
   const baseDir = path.dirname(fileURLToPath(import.meta.url));
@@ -62,7 +63,26 @@ export default async function (pi: ExtensionAPI) {
       },
       required: ["mode"],
     },
-    async execute(_toolCallId: string, params: { mode: string }) {
+    async execute(_toolCallId: string, params: { mode: string }, _signal: unknown, _onUpdate: unknown, ctx: ExtensionContext) {
+      // Check if current mode allows auto-switching without confirmation
+      const currentDef = coordinator.currentDefinition();
+      const skipConfirm = currentDef?.auto_mode_switch === true;
+      
+      if (!skipConfirm) {
+        const currentMode = coordinator.currentMode();
+        const confirmed = await ctx.ui.confirm(
+          "Mode Switch",
+          `Agent wants to switch from ${currentMode.toUpperCase()} to ${params.mode.toUpperCase()} mode. Allow?`
+        );
+        if (!confirmed) {
+          return {
+            content: [{ type: "text" as const, text: `User denied mode switch to ${params.mode}.` }],
+            details: undefined,
+            isError: true,
+          };
+        }
+      }
+      
       const result = coordinator.switchMode(params.mode);
       if (result.ok) {
         return { content: [{ type: "text" as const, text: `Switched to ${result.mode} mode. You can now retry your previous tool call.` }], details: undefined };
@@ -83,18 +103,19 @@ export default async function (pi: ExtensionAPI) {
 
   // Initialize on session start or resume
   pi.on("session_start", async (_event, ctx) => {
-    await coordinator.initialize(ctx);
+    const sessionId = crypto.randomUUID();
+    await coordinator.initialize(ctx, sessionId);
     coordinator.captureBaselineTools();
 
-    // Detect subagent session: Agent tool is excluded by subagent runner
+    // Detect subagent session using environment variable (primary) or tool-based detection (fallback)
     const allToolNames = pi.getAllTools().map(t => t.name);
-    const isSubagent = !allToolNames.includes("Agent");
+    const isSubagent = process.env.PI_IS_SUBAGENT === "1" || !allToolNames.includes("Agent");
     const subagentMode = isSubagent
       ? (allToolNames.includes("write") || allToolNames.includes("edit") ? "code" : "plan")
       : undefined;
 
     const flag = pi.getFlag("mode");
-    coordinator.restoreMode(typeof flag === "string" ? flag : undefined, subagentMode ?? lastSessionMode(ctx));
+    coordinator.restoreMode(typeof flag === "string" ? flag : undefined, lastSessionMode(ctx, sessionId) ?? subagentMode);
     coordinator.setupEditor();
   });
 
