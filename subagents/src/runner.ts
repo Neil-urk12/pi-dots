@@ -244,6 +244,7 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 			const proc = spawn(command, spawnArgs, {
 				cwd,
 				stdio: ["ignore", "pipe", "pipe"],
+				env: { ...process.env, PI_IS_SUBAGENT: "1" },
 			});
 
 			let buf = "";
