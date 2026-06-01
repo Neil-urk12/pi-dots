@@ -8,7 +8,7 @@ export { buildModeCatalog, loadAllModes } from "./mode-catalog.js";
 export { ModeFileWatcher } from "./mode-file-watcher.js";
 export { ModeRuntimeController } from "./mode-runtime.js";
 export { ModeSessionCoordinator, lastSessionMode } from "./mode-session-coordinator.js";
-export { evaluateToolCall } from "./mode-tool-policy.js";
+export { evaluateToolCall, findModesForTool } from "./mode-tool-policy.js";
 export { injectIntoPayload } from "./payload-injection.js";
 
 export default async function (pi: ExtensionAPI) {
@@ -45,6 +45,28 @@ export default async function (pi: ExtensionAPI) {
   pi.registerShortcut(Key.ctrlShift("m"), {
     description: "Cycle modes (yolo → plan → code → ask → orchestrator)",
     handler: async () => coordinator.cycleMode(),
+  });
+
+  // Tool: request_mode_switch — allows agent to switch modes when blocked
+  pi.registerTool("request_mode_switch", {
+    description: "Switch to a different agent mode. Use this when a tool call is blocked and the error message suggests switching modes.",
+    parameters: {
+      type: "object",
+      properties: {
+        mode: {
+          type: "string",
+          description: "The mode to switch to (e.g. code, yolo, plan, ask, orchestrator)",
+        },
+      },
+      required: ["mode"],
+    },
+    handler: async (input: { mode: string }) => {
+      const result = coordinator.switchMode(input.mode);
+      if (result.ok) {
+        return { success: true, mode: result.mode, message: `Switched to ${result.mode} mode. You can now retry your previous tool call.` };
+      }
+      return { success: false, error: result.error };
+    },
   });
 
   // Inject mode prompt on every provider request
