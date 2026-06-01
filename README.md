@@ -23,3 +23,9 @@ See the [pi-lazygit README](./pi-lazygit/) for installation.
 Registers an [OpenGateway](https://opengateway.gitlawb.com) provider using the OpenAI-compatible completions API. Bring your own gateway and models.
 
 See the [pi-opengateway README](./pi-opengateway/) for configuration.
+
+### [agent-modes](./agent-modes/)
+
+Multi-mode extension for the pi coding agent: **YOLO**, **PLAN**, **CODE**, **ASK**, and **ORCHESTRATOR**. Features include one-shot bypass for blocked tools, session-scoped mode state, mode switch confirmation, and subagent detection.
+
+See the [agent-modes README](./agent-modes/) for installation and configuration.
