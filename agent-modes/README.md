@@ -2,6 +2,16 @@
 
 Multi-mode extension for the pi coding agent: **YOLO**, **PLAN**, **CODE**, **ASK**, and **ORCHESTRATOR**.
 
+Features include one-shot bypass for blocked tools, session-scoped mode state, mode switch confirmation, and subagent detection.
+
+## What's New
+
+- **One-shot bypass**: When a tool is blocked by mode policy, choose "Allow once" to permit a single use without switching modes
+- **Session-scoped mode state**: Mode selection persists per session using UUID session IDs
+- **Mode switch confirmation**: `request_mode_switch` shows a confirmation dialog before switching (unless `auto_mode_switch: true`)
+- **Subagent detection**: `PI_IS_SUBAGENT` environment variable for reliable subagent identification
+- **Orchestrator agents**: `blitz` (fast codebase recon), `grind` (general-purpose code agent), `seeker` (web research)
+
 ## Installation
 
 ```bash
@@ -76,6 +86,11 @@ Coordination mode. Full tool access, but system prompt encourages:
 - Delegating to subagents using the `subagent` tool
 - Tracking progress and synthesizing results
 
+Available agents:
+- **blitz** — Fast codebase recon (explore files, find patterns, map architecture)
+- **grind** — General-purpose code agent (read, write, edit code, run tests)
+- **seeker** — Web research (search the web and synthesize findings)
+
 Requires the subagent extension to be loaded for full delegation capability.
 
 ### ASK
@@ -114,7 +129,7 @@ This configuration is merged over the built-in markdown definitions.
 - Run `/mode reload` to immediately reload the mode definitions and your overrides.
 - The `modes/` directory and your `config.yaml` are auto-watched. Edits trigger an automatic hot-reload when your turn ends.
 
-v0.1.1 (current): markdown-driven config with mode-specific `bash_policy`, enforced via `mode-tool-policy`.
+v0.2.0 (current): markdown-driven config with mode-specific `bash_policy`, one-shot bypass, session-scoped mode state, mode switch confirmation, subagent detection, and orchestrator agents (blitz/grind/seeker).
 ## Development
 
 ```bash
