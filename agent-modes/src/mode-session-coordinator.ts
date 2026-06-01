@@ -171,19 +171,38 @@ export class ModeSessionCoordinator {
   evaluateToolCall(toolName: string, input: unknown): { block: boolean; reason?: string } | undefined {
     this.runtime?.transition({ type: "tool_call", toolName });
     const mode = this.currentMode();
-    return evaluateToolCall({
+    const catalogDefs = this.runtime?.catalogDefinitions();
+    const decision = evaluateToolCall({
       mode,
       definition: this.runtime?.definition(),
       toolName,
       input,
+      catalog: catalogDefs,
     });
+
+    if (decision.block && decision.suggestedModes && decision.suggestedModes.length > 0) {
+      const suggestions = decision.suggestedModes.join(", ");
+      return {
+        block: true,
+        reason: `${decision.reason}\n\nTo use this tool, switch to: ${suggestions}. Call request_mode_switch({ mode: "<mode>" }).`,
+      };
+    }
+
+    return decision;
   }
 
   buildPromptInjection(): string | undefined {
     const mode = this.currentMode();
     const promptSuffix = this.runtime?.currentPromptSuffix();
-    if (!promptSuffix) return undefined;
-    return `\n\n[MODE: ${mode.toUpperCase()}]\n${promptSuffix}`;
+    const base = promptSuffix ? `\n\n[MODE: ${mode.toUpperCase()}]\n${promptSuffix}` : `\n\n[MODE: ${mode.toUpperCase()}]`;
+
+    // Skip GUARD hint for unrestricted modes (no tool restrictions)
+    const definition = this.runtime?.definition();
+    const hasRestrictions = (definition?.enabled_tools && definition.enabled_tools.length > 0) || (definition?.bash_policy && definition.bash_policy !== "off");
+    if (!hasRestrictions) return promptSuffix ? base : undefined;
+
+    const hint = `\n[GUARD] If a tool call is blocked, the error will suggest which mode to switch to. Use request_mode_switch({ mode: "<mode>" }) to switch, then retry the tool call.`;
+    return base + hint;
   }
 
   beforeProviderRequest(payload: unknown): unknown {
@@ -245,6 +264,22 @@ export class ModeSessionCoordinator {
       }
       return new ModeEditor(tui, theme, keybindings);
     });
+  }
+
+  /**
+   * Switch to a target mode programmatically (used by request_mode_switch tool).
+   * Returns success with new mode name, or error message.
+   */
+  // targetMode is validated against catalog.definitions inside runtime.transition
+  switchMode(targetMode: string): { ok: boolean; mode?: string; error?: string } {
+    if (!this.runtime) return { ok: false, error: "Mode catalog not initialized" };
+    if (!targetMode || typeof targetMode !== "string" || targetMode.length > 50) return { ok: false, error: "Invalid mode name" };
+    const decision = this.runtime.transition({ type: "mode_select", requestedMode: targetMode });
+    if (decision.error) return { ok: false, error: decision.error };
+    this.applyDecision(decision);
+    this.updateStatus();
+    if (decision.modeChanged && this.ctx) this.ctx.ui.notify(`Mode switched: ${this.currentMode().toUpperCase()}`, "info");
+    return { ok: true, mode: this.currentMode() };
   }
 
   // --- Private ---

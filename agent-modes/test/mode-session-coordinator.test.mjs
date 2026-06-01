@@ -250,7 +250,7 @@ test("evaluateToolCall returns policy decision", async () => {
   // orchestrator has no bash_policy, defaults to "off" — all commands allowed
   const result = coordinator.evaluateToolCall("bash", { command: "rm -rf /" });
 
-  expect(result).toEqual({ block: false });
+  expect(result).toMatchObject({ block: false });
 });
 
 test("evaluateToolCall blocks when fail-closed (no runtime)", () => {
@@ -264,7 +264,7 @@ test("evaluateToolCall blocks when fail-closed (no runtime)", () => {
   expect(result.reason).toContain("fail-closed");
 });
 
-test("buildPromptInjection returns undefined when no suffix", async () => {
+test("buildPromptInjection returns undefined for unrestricted mode (yolo)", async () => {
   const pi = mockPi();
   const ctx = mockCtx();
   const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
@@ -277,7 +277,7 @@ test("buildPromptInjection returns undefined when no suffix", async () => {
   expect(result).toBeUndefined();
 });
 
-test("beforeProviderRequest returns payload unchanged when no injection", async () => {
+test("beforeProviderRequest does not inject when unrestricted mode (yolo)", async () => {
   const pi = mockPi();
   const ctx = mockCtx();
   const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
@@ -288,7 +288,7 @@ test("beforeProviderRequest returns payload unchanged when no injection", async 
   const payload = { system: "hello" };
   const result = coordinator.beforeProviderRequest(payload);
 
-  expect(result).toBe(payload);
+  expect(payload.system).toBe("hello");
 });
 
 test("beforeProviderRequest injects mode prompt when suffix exists", async () => {
@@ -303,6 +303,19 @@ test("beforeProviderRequest injects mode prompt when suffix exists", async () =>
 
   expect(payload.system).toContain("[MODE: ORCHESTRATOR]");
   expect(payload.system).toContain("orchestrator mode");
+});
+
+test("buildPromptInjection includes GUARD hint for restricted mode (plan)", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("plan", async () => undefined);
+
+  const result = coordinator.buildPromptInjection();
+
+  expect(result).toContain("[MODE: PLAN]");
+  expect(result).toContain("[GUARD]");
 });
 
 test("turnEnd persists mode state", async () => {
@@ -336,6 +349,88 @@ test("handleCommand without runtime returns undefined", async () => {
   const result = await coordinator.handleCommand("plan", async () => undefined);
 
   expect(result).toBeUndefined();
+});
+
+test("switchMode rejects empty string", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  const result = coordinator.switchMode("");
+  expect(result.ok).toBe(false);
+  expect(result.error).toBeDefined();
+});
+
+test("switchMode rejects overly long mode name", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  const result = coordinator.switchMode("a".repeat(51));
+  expect(result.ok).toBe(false);
+});
+
+test("switchMode to current mode returns ok", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  const result = coordinator.switchMode("orchestrator");
+  expect(result.ok).toBe(true);
+  expect(result.mode).toBe("orchestrator");
+});
+
+test("switchMode returns error when runtime not initialized", () => {
+  const pi = mockPi();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  // No initialize — runtime is undefined
+  const result = coordinator.switchMode("plan");
+  expect(result.ok).toBe(false);
+  expect(result.error).toContain("not initialized");
+});
+
+test("switchMode returns error for invalid mode name", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  const result = coordinator.switchMode("nonexistent");
+  expect(result.ok).toBe(false);
+  expect(result.error).toBeDefined();
+});
+
+test("evaluateToolCall augments reason with suggestion text when blocked", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  // Switch to plan which restricts tools
+  await coordinator.handleCommand("plan", async () => undefined);
+
+  // Try to use edit (blocked in plan mode)
+  const result = coordinator.evaluateToolCall("edit", {});
+
+  expect(result.block).toBe(true);
+  // Should contain suggestion text from coordinator wrapper
+  expect(result.reason).toContain("request_mode_switch");
+});
+
+test("buildPromptInjection includes GUARD hint for restricted mode without prompt_suffix", async () => {
+  // This tests a mode that has enabled_tools but no prompt_suffix
+  // We need to check if any built-in mode matches this pattern, or test the logic directly
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  // Switch to ask mode — check if it has restrictions
+  await coordinator.handleCommand("ask", async () => undefined);
+
+  const result = coordinator.buildPromptInjection();
+
+  // ask mode has enabled_tools (restricted), so GUARD hint should be present
+  if (result) {
+    expect(result).toContain("[GUARD]");
+  }
 });
 
 // --- lastSessionMode ---

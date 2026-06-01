@@ -1,15 +1,64 @@
 import type { BashPolicy, ModeDefinition } from "./types.js";
 
+export type ModeCatalogMap = Map<string, { enabled_tools?: string[]; bash_policy?: string }>;
 export interface ModeToolPolicyInput {
   mode: string;
   definition?: ModeDefinition;
   toolName: string;
   input?: unknown;
+  /** Full mode catalog. Undefined entries or empty enabled_tools = unrestricted (all tools allowed). */
+  catalog?: ModeCatalogMap;
 }
 
 export interface ModeToolPolicyDecision {
   block: boolean;
   reason?: string;
+  suggestedModes?: string[];  // modes that would allow this tool call
+}
+
+/**
+ * Given a tool name (and optional bash command), return which modes from the catalog
+ * would allow that tool call.
+ */
+export function findModesForTool(
+  toolName: string,
+  definitions: ModeCatalogMap,
+  input?: unknown,
+): string[] {
+  const result: string[] = [];
+
+  for (const [mode, def] of definitions) {
+    // Check tool allowlist
+    const allowed = def.enabled_tools;
+    if (Array.isArray(allowed) && allowed.length > 0 && !allowed.includes(toolName)) {
+      continue; // tool not in this mode's allowlist
+    }
+
+    // For bash, also check bash_policy
+    if (toolName === "bash") {
+      const command = commandFromInput(input);
+      const policy = def.bash_policy as BashPolicy | undefined;
+      const resolvedPolicy = policy ?? resolveDefaultBashPolicy(mode);
+
+      if (resolvedPolicy === "strict_readonly" && !isSafeCommand(command)) {
+        continue; // bash command not allowed in strict_readonly
+      }
+      if (resolvedPolicy === "non_destructive" && isDestructiveCommand(command)) {
+        continue; // destructive bash not allowed in non_destructive
+      }
+    }
+
+    result.push(mode);
+  }
+
+  return result;
+}
+
+function resolveDefaultBashPolicy(mode: string): BashPolicy {
+  const normalized = mode.trim().toLowerCase();
+  if (normalized === "plan" || normalized === "ask") return "strict_readonly";
+  if (normalized === "code") return "non_destructive";
+  return "off";
 }
 
 const FAIL_CLOSED_READ_ONLY_TOOLS = new Set([
@@ -116,12 +165,14 @@ const SAFE_PATTERNS = [
   /^\s*eza\b/,
 ] as const;
 
-export function evaluateToolCall({ mode, definition, toolName, input }: ModeToolPolicyInput): ModeToolPolicyDecision {
+export function evaluateToolCall({ mode, definition, toolName, input, catalog }: ModeToolPolicyInput): ModeToolPolicyDecision {
+  const suggestedModes = catalog ? findModesForTool(toolName, catalog, input) : undefined;
   if (!definition) {
     if (!FAIL_CLOSED_READ_ONLY_TOOLS.has(toolName)) {
       return {
         block: true,
         reason: `Mode '${mode}' not initialized — fail-closed blocks tool: ${toolName}`,
+        suggestedModes,
       };
     }
 
@@ -131,11 +182,12 @@ export function evaluateToolCall({ mode, definition, toolName, input }: ModeTool
         return {
           block: true,
           reason: `Mode '${mode}' not initialized — fail-closed blocked unsafe command: ${command}`,
+          suggestedModes,
         };
       }
     }
 
-    return { block: false };
+    return { block: false, suggestedModes };
   }
 
   const allowed = definition.enabled_tools;
@@ -143,6 +195,7 @@ export function evaluateToolCall({ mode, definition, toolName, input }: ModeTool
     return {
       block: true,
       reason: `${mode.toUpperCase()} mode blocks tool: ${toolName}. Allowed tools: ${allowed.join(", ")}`,
+      suggestedModes,
     };
   }
 
@@ -153,19 +206,21 @@ export function evaluateToolCall({ mode, definition, toolName, input }: ModeTool
     if (bashPolicy === "strict_readonly" && !isSafeCommand(command)) {
       return {
         block: true,
-        reason: `${mode.toUpperCase()} mode blocked unsafe command: ${command}\nAllowed read-only commands only. Use /mode yolo to enable full bash.`,
+        reason: `${mode.toUpperCase()} mode blocked unsafe command: ${command}\nAllowed read-only commands only.`,
+        suggestedModes,
       };
     }
 
     if (bashPolicy === "non_destructive" && isDestructiveCommand(command)) {
       return {
         block: true,
-        reason: `${mode.toUpperCase()} mode blocked destructive command: ${command}\nAllowed development commands only. Switch to YOLO (/mode yolo) if you need this.`,
+        reason: `${mode.toUpperCase()} mode blocked destructive command: ${command}\nAllowed development commands only.`,
+        suggestedModes,
       };
     }
   }
 
-  return { block: false };
+  return { block: false, suggestedModes };
 }
 
 function commandFromInput(input: unknown): string {
@@ -176,11 +231,7 @@ function commandFromInput(input: unknown): string {
 
 function resolveBashPolicy(mode: string, definition: ModeDefinition): BashPolicy {
   if (definition.bash_policy) return definition.bash_policy;
-
-  const normalized = mode.trim().toLowerCase();
-  if (normalized === "plan" || normalized === "ask") return "strict_readonly";
-  if (normalized === "code") return "non_destructive";
-  return "off";
+  return resolveDefaultBashPolicy(mode);
 }
 
 function isDestructiveCommand(command: string): boolean {

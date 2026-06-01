@@ -1,5 +1,6 @@
 import type { ModeCatalog } from "./mode-catalog.js";
 import type { ModeDefinition } from "./types.js";
+import type { ModeCatalogMap } from "./mode-tool-policy.js";
 
 export type Mode = string;
 
@@ -116,6 +117,10 @@ export class ModeRuntimeController {
 
   lastLoadTime(): number {
     return this.catalog.loadedAt;
+  }
+
+  catalogDefinitions(): ModeCatalogMap {
+    return this.catalog.definitions;
   }
 
   captureBaselineTools(toolNames: string[]): void {
