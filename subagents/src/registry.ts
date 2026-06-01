@@ -9,7 +9,15 @@ export const DEFAULT_MODELS: Record<string, string> = {
 	grind: "anthropic/claude-sonnet-4-6",
 };
 
+const VALID_THINKING_LEVELS = new Set(["off", "minimal", "low", "medium", "high", "xhigh"]);
+
+export function validateThinking(value: string | undefined): AgentConfig["thinking"] | undefined {
+	if (value === undefined) return undefined;
+	return VALID_THINKING_LEVELS.has(value) ? (value as AgentConfig["thinking"]) : undefined;
+}
+
 let agents: AgentConfig[] = [];
+let dynamicAgentNames = new Set<string>();
 
 export function getAgents(): AgentConfig[] {
 	return agents;
@@ -19,18 +27,28 @@ export function registerAgent(config: AgentConfig): void {
 	if (agents.find((a) => a.name === config.name)) {
 		throw new Error(`Agent already registered: ${config.name}`);
 	}
+	dynamicAgentNames.add(config.name);
 	agents.push(config);
 }
 
 export function unregisterAgent(name: string): void {
 	agents = agents.filter((a) => a.name !== name);
+	dynamicAgentNames.delete(name);
+}
+
+/** Reset all agents and dynamic tracking. For test use only. */
+export function resetAgents(): void {
+	agents = [];
+	dynamicAgentNames.clear();
 }
 
 // Expose registration functions globally so other extensions loaded via jiti
 // (which creates separate module instances) can access the shared agents array.
-(globalThis as any).__pi_subagents = { registerAgent, unregisterAgent };
+(globalThis as any).__pi_subagents = { registerAgent, unregisterAgent, getAgents };
 
-export function loadAgents(extDir: string, config: ExtensionConfig): void {
+export function loadAgents(extDir: string, config: ExtensionConfig, parentModel?: string): void {
+	// Preserve dynamically registered agents across reloads
+	const preserved = agents.filter(a => dynamicAgentNames.has(a.name));
 	agents = [];
 	const modelDefaults: Record<string, string> = {
 		...DEFAULT_MODELS,
@@ -42,7 +60,10 @@ export function loadAgents(extDir: string, config: ExtensionConfig): void {
 		),
 	};
 	const agentsDir = path.join(extDir, "agents");
-	if (!fs.existsSync(agentsDir)) return;
+	if (!fs.existsSync(agentsDir)) {
+		agents.push(...preserved);
+		return;
+	}
 
 	for (const entry of fs.readdirSync(agentsDir)) {
 		if (!entry.endsWith(".md")) continue;
@@ -65,16 +86,19 @@ export function loadAgents(extDir: string, config: ExtensionConfig): void {
 			model:
 				frontmatter.model ||
 				modelDefaults[frontmatter.name] ||
+				parentModel ||
 				"anthropic/claude-sonnet-4-6",
-			thinking:
-				(frontmatter.thinking ??
+			thinking: validateThinking(
+				frontmatter.thinking ??
 				(typeof (config.models as any)[frontmatter.name] === "object"
 					? (config.models as any)[frontmatter.name].thinking
-					: undefined)) as AgentConfig["thinking"],
+					: undefined)
+			),
 			systemPrompt: body,
 			filePath,
 			useParentExtensions: frontmatter.useParentExtensions === "true",
 			extensions: extensions.length > 0 ? extensions : undefined,
 		});
 	}
+	agents.push(...preserved);
 }
