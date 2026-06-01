@@ -1,8 +1,9 @@
 import type { ModeCatalog } from "./mode-catalog.js";
 import type { ModeDefinition } from "./types.js";
+import { DEFAULT_MODE, SAFE_FALLBACK_MODES } from "./types.js";
 import type { ModeCatalogMap } from "./mode-tool-policy.js";
 
-export type Mode = string;
+import type { Mode } from "./types.js";
 
 export interface ModeRuntimeControllerOptions {
   defaultMode?: Mode;
@@ -92,8 +93,8 @@ export class ModeRuntimeController {
 
   constructor(catalog: ModeCatalog, options: ModeRuntimeControllerOptions = {}) {
     this.catalog = catalog;
-    this.defaultMode = options.defaultMode ?? "orchestrator";
-    this.safeFallbackModes = options.safeFallbackModes ?? ["plan", "ask", "yolo"];
+    this.defaultMode = options.defaultMode ?? DEFAULT_MODE;
+    this.safeFallbackModes = options.safeFallbackModes ?? SAFE_FALLBACK_MODES;
     this.currentMode = this.catalog.definitions.has(this.defaultMode)
       ? this.defaultMode
       : this.firstAvailableMode();

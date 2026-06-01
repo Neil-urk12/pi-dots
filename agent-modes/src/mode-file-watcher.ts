@@ -1,3 +1,5 @@
+import { errorMessage, errorCode } from "./types.js";
+
 export class ModeFileWatcher {
   constructor(
     private readonly modesDir: string,
@@ -11,8 +13,9 @@ export class ModeFileWatcher {
     try {
       const st = await fs.stat(this.userConfigPath);
       if (st.mtimeMs > since) return true;
-    } catch (err: any) {
-      if (err?.code === "EACCES" || err?.code === "EPERM") {
+    } catch (err: unknown) {
+      const code = errorCode(err);
+      if (code === "EACCES" || code === "EPERM") {
         console.error(`Permission denied: ${this.userConfigPath}`, err);
       }
     }
@@ -24,11 +27,17 @@ export class ModeFileWatcher {
           try {
             const st = await fs.stat(path.join(this.modesDir, file));
             if (st.mtimeMs > since) return true;
-          } catch (_) {}
+          } catch (err) {
+            const code = errorCode(err);
+            if (code && code !== "ENOENT") {
+              console.error(`[pi-agent-modes] Error statting mode file: ${file}`, err);
+            }
+          }
         }
       }
-    } catch (err: any) {
-      if (err?.code === "EACCES" || err?.code === "EPERM") {
+    } catch (err: unknown) {
+      const code = errorCode(err);
+      if (code === "EACCES" || code === "EPERM") {
         console.error(`Permission denied: ${this.modesDir}`, err);
       }
     }

@@ -42,11 +42,11 @@
     "test:watch": "vitest"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
+    "@earendil-works/pi-coding-agent": ">=0.1.0"
   },
   "devDependencies": {
     "tsup": "^8.5.1",
-    "typescript": "^6.0.3",
+    "typescript": "^5.7.0",
     "vitest": "^4.1.7"
   },
   "dependencies": {
