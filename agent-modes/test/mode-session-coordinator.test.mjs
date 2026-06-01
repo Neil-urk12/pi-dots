@@ -247,10 +247,20 @@ test("evaluateToolCall returns policy decision", async () => {
   const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
   await coordinator.initialize(ctx);
 
-  // orchestrator has no bash_policy, defaults to "off" — all commands allowed
+  // orchestrator explicitly sets bash_policy: off — all commands allowed
   const result = coordinator.evaluateToolCall("bash", { command: "rm -rf /" });
 
   expect(result).toMatchObject({ block: false });
+});
+
+test("orchestrator explicitly sets bash_policy: off (not relying on defaults)", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  const def = coordinator.currentDefinition();
+  expect(def).toBeDefined();
+  expect(def.bash_policy).toBe("off");
 });
 
 test("evaluateToolCall blocks when fail-closed (no runtime)", () => {
@@ -263,6 +273,24 @@ test("evaluateToolCall blocks when fail-closed (no runtime)", () => {
   expect(result.block).toBe(true);
   expect(result.reason).toContain("fail-closed");
 });
+
+test("code mode blocks destructive bash but allows dev commands (non_destructive)", async () => {
+  const pi = mockPi();
+  const ctx = mockCtx();
+  const coordinator = new ModeSessionCoordinator(pi, new URL("../dist/", import.meta.url).pathname);
+  await coordinator.initialize(ctx);
+  await coordinator.handleCommand("code", async () => undefined);
+
+  // Destructive command should be blocked
+  const rmResult = coordinator.evaluateToolCall("bash", { command: "rm -rf dist" });
+  expect(rmResult.block).toBe(true);
+  expect(rmResult.reason).toContain("destructive");
+
+  // Dev command should be allowed
+  const testResult = coordinator.evaluateToolCall("bash", { command: "npm test" });
+  expect(testResult.block).toBe(false);
+});
+
 
 test("buildPromptInjection returns undefined for unrestricted mode (yolo)", async () => {
   const pi = mockPi();
