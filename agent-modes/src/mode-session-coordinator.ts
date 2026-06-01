@@ -14,6 +14,11 @@ import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER
 
 import type { Mode } from "./types.js";
 
+/** Typed interface for the subagent extension's global bridge. */
+interface SubagentBridge {
+  getAgents(): (string | { name: string })[];
+}
+
 export interface ModeSelectOption {
   name: string;
   description?: string;
@@ -169,24 +174,36 @@ export class ModeSessionCoordinator {
 
   // --- Hooks ---
 
-  evaluateToolCall(toolName: string, input: unknown): { block: boolean; reason?: string } | undefined {
+  evaluateToolCall(toolName: string, input: unknown): { block: boolean; reason?: string; warning?: string } | undefined {
     this.runtime?.transition({ type: "tool_call", toolName });
     const mode = this.currentMode();
     const catalogDefs = this.runtime?.catalogDefinitions();
+    const availableAgents = this.discoverAvailableAgents();
     const decision = evaluateToolCall({
       mode,
       definition: this.runtime?.definition(),
       toolName,
       input,
       catalog: catalogDefs,
+      availableAgents,
     });
 
     if (decision.block && decision.suggestedModes && decision.suggestedModes.length > 0) {
+      // Surface warning before early return
+      if (decision.warning) {
+        this.ctx?.ui.notify(decision.warning, "warning");
+      }
       const suggestions = decision.suggestedModes.join(", ");
       return {
         block: true,
         reason: `${decision.reason}\n\nTo use this tool, switch to: ${suggestions}. Call request_mode_switch({ mode: "<mode>" }).`,
+        warning: decision.warning,
       };
+    }
+
+    // Surface non-blocking config warnings to user
+    if (decision.warning) {
+      this.ctx?.ui.notify(decision.warning, "warning");
     }
 
     return decision;
@@ -202,8 +219,22 @@ export class ModeSessionCoordinator {
     const hasRestrictions = (definition?.enabled_tools && definition.enabled_tools.length > 0) || (definition?.bash_policy && definition.bash_policy !== "off");
     if (!hasRestrictions) return promptSuffix ? base : undefined;
 
+    let injection = base;
+
+    // Append available agents for delegation modes
+    if (mode === "orchestrator" || (definition?.allowed_agents && definition.allowed_agents.length > 0)) {
+      const available = this.discoverAvailableAgents();
+      const allowed = definition?.allowed_agents;
+      const agents = allowed && allowed.length > 0
+        ? available.filter(a => allowed.some(entry => entry.toLowerCase() === a.toLowerCase()))
+        : available;
+      if (agents.length > 0) {
+        injection += `\n\n[AGENTS] Available subagents: ${agents.join(", ")}`;
+      }
+    }
+
     const hint = `\n[GUARD] If a tool call is blocked, the error will suggest which mode to switch to. Use request_mode_switch({ mode: "<mode>" }) to switch, then retry the tool call.`;
-    return base + hint;
+    return injection + hint;
   }
 
   beforeProviderRequest(payload: unknown): unknown {
@@ -325,8 +356,26 @@ export class ModeSessionCoordinator {
     const status = `Mode: ${mode}\nDescription: ${def?.description || "—"}\nActive tools (${activeTools.length}): ${activeTools.join(", ")}\nPrompt suffix: ${suffixPreview || "(none)"}\nBorder: ${def?.border_label || ""} (style: ${def?.border_style || "—"})`;
     this.ctx.ui.notify(status, "info");
   }
-}
 
+  /**
+   * Discover available subagent names from the subagent extension's global bridge.
+   * Returns empty array if the bridge is not present.
+   */
+  private discoverAvailableAgents(): string[] {
+    try {
+      const bridge = (globalThis as Record<string, unknown>).__pi_subagents as SubagentBridge | undefined;
+      if (bridge && typeof bridge.getAgents === "function") {
+        const agents = bridge.getAgents();
+        if (Array.isArray(agents)) {
+          return agents.map(a => typeof a === "string" ? a : a.name).filter(Boolean);
+        }
+      }
+    } catch {
+      // bridge not available — that's fine
+    }
+    return [];
+  }
+}
 export function lastSessionMode(ctx: ExtensionContext): string | undefined {
   const last = ctx.sessionManager.getEntries()
     .filter((e) => e.type === "custom" && e.customType === "mode-state")

@@ -1,10 +1,30 @@
 ---
 mode: orchestrator
-bash_policy: off
-enabled_tools: []  # empty = all tools
+bash_policy: strict_readonly
+enabled_tools:
+  - Agent
+  - subagent
+  - get_subagent_result
+  - steer_subagent
+  - todo
+  - read
+  - grep
+  - find
+  - ls
+  - questionnaire
+  - ask_user_question
+  - request_mode_switch
 description: "Coordination mode. Delegates tasks to subagents."
 border_label: " ORCH "
 border_style: accent
+allowed_agents:
+  - Explore
+  - Plan
+  - general-purpose
+  - scout
+  - worker
+  - planner
+  - reviewer
 prompt_suffix: |
   [MODE: ORCHESTRATOR]
   You are in orchestrator mode. Your role is to coordinate, not to execute.

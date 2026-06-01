@@ -1,6 +1,12 @@
 import type { BashPolicy, ModeDefinition } from "./types.js";
 
-export type ModeCatalogMap = Map<string, { enabled_tools?: string[]; bash_policy?: BashPolicy }>;
+export type ModeCatalogMap = Map<string, { enabled_tools?: string[]; bash_policy?: BashPolicy; allowed_agents?: string[] }>; 
+
+/** Case-insensitive check: does list contain item? */
+function includesCI(list: string[], item: string): boolean {
+  const lower = item.toLowerCase();
+  return list.some(a => a.toLowerCase() === lower);
+}
 export interface ModeToolPolicyInput {
   mode: string;
   definition?: ModeDefinition;
@@ -8,12 +14,15 @@ export interface ModeToolPolicyInput {
   input?: unknown;
   /** Full mode catalog. Undefined entries or empty enabled_tools = unrestricted (all tools allowed). */
   catalog?: ModeCatalogMap;
+  /** Known available agent names from the subagent system. Used to validate allowed_agents. */
+  availableAgents?: string[];
 }
 
 export interface ModeToolPolicyDecision {
   block: boolean;
   reason?: string;
   suggestedModes?: string[];  // modes that would allow this tool call
+  warning?: string;  // non-blocking config issue (e.g. allowed_agents entry not found in availableAgents)
 }
 
 /**
@@ -32,6 +41,17 @@ export function findModesForTool(
     const allowed = def.enabled_tools;
     if (Array.isArray(allowed) && allowed.length > 0 && !allowed.includes(toolName)) {
       continue; // tool not in this mode's allowlist
+    }
+
+    // For delegation tools, also check allowed_agents
+    if (toolName === "subagent" || toolName === "Agent") {
+      const allowedAgents = def.allowed_agents;
+      if (Array.isArray(allowedAgents) && allowedAgents.length > 0) {
+        const requestedAgents = agentNamesFromInput(toolName, input);
+        if (requestedAgents.some(a => !includesCI(allowedAgents, a))) {
+          continue; // agent not allowed in this mode
+        }
+      }
     }
 
     // For bash, also check bash_policy
@@ -164,7 +184,7 @@ const SAFE_PATTERNS = [
   /^\s*eza\b/,
 ] as const;
 
-export function evaluateToolCall({ mode, definition, toolName, input, catalog }: ModeToolPolicyInput): ModeToolPolicyDecision {
+export function evaluateToolCall({ mode, definition, toolName, input, catalog, availableAgents }: ModeToolPolicyInput): ModeToolPolicyDecision {
   const suggestedModes = catalog ? findModesForTool(toolName, catalog, input) : undefined;
   if (!definition) {
     if (!FAIL_CLOSED_READ_ONLY_TOOLS.has(toolName)) {
@@ -198,6 +218,34 @@ export function evaluateToolCall({ mode, definition, toolName, input, catalog }:
     };
   }
 
+  // Agent name validation for delegation tools
+  if (toolName === "subagent" || toolName === "Agent") {
+    const allowedAgents = definition.allowed_agents;
+    if (Array.isArray(allowedAgents) && allowedAgents.length > 0) {
+      const requestedAgents = agentNamesFromInput(toolName, input);
+      const blocked = requestedAgents.filter(a => !includesCI(allowedAgents, a));
+      if (blocked.length > 0) {
+        return {
+          block: true,
+          reason: `${mode.toUpperCase()} mode does not allow agent(s): ${blocked.join(", ")}. Allowed agents: ${allowedAgents.join(", ")}`,
+          suggestedModes,
+        };
+      }
+    }
+
+    // Warn if allowed_agents lists agents not found in availableAgents
+    if (Array.isArray(definition.allowed_agents) && definition.allowed_agents.length > 0 && Array.isArray(availableAgents) && availableAgents.length > 0) {
+      const missing = definition.allowed_agents.filter(a => !includesCI(availableAgents, a));
+      if (missing.length > 0) {
+        return {
+          block: false,
+          suggestedModes,
+          warning: `allowed_agents references unknown agent(s): ${missing.join(", ")}. Available agents: ${availableAgents.join(", ")}`,
+        };
+      }
+    }
+  }
+
   if (toolName === "bash") {
     const command = commandFromInput(input);
     const bashPolicy = resolveBashPolicy(mode, definition);
@@ -226,6 +274,38 @@ function commandFromInput(input: unknown): string {
   if (!input || typeof input !== "object") return "";
   const value = (input as { command?: unknown }).command;
   return typeof value === "string" ? value : "";
+}
+
+/** Extract agent name(s) from subagent/Agent tool input. */
+function agentNamesFromInput(toolName: string, input: unknown): string[] {
+  if (!input || typeof input !== "object") return [];
+  const obj = input as Record<string, unknown>;
+
+  if (toolName === "subagent") {
+    const names: string[] = [];
+    if (typeof obj.agent === "string") names.push(obj.agent);
+    if (Array.isArray(obj.tasks)) {
+      for (const t of obj.tasks) {
+        if (t && typeof t === "object" && typeof (t as Record<string, unknown>).agent === "string") {
+          names.push((t as Record<string, unknown>).agent as string);
+        }
+      }
+    }
+    if (Array.isArray(obj.chain)) {
+      for (const t of obj.chain) {
+        if (t && typeof t === "object" && typeof (t as Record<string, unknown>).agent === "string") {
+          names.push((t as Record<string, unknown>).agent as string);
+        }
+      }
+    }
+    return names;
+  }
+
+  if (toolName === "Agent") {
+    if (typeof obj.subagent_type === "string") return [obj.subagent_type];
+  }
+
+  return [];
 }
 
 function resolveBashPolicy(mode: string, definition: ModeDefinition): BashPolicy {
