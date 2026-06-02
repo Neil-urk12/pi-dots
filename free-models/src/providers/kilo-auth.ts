@@ -3,7 +3,7 @@
  */
 
 import { createLogger } from "../lib/logger.ts";
-import { exec } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const _logger = createLogger("kilo-auth");
 
@@ -63,13 +63,19 @@ function abortableSleep(ms: number, signal?: AbortSignal): Promise<void> {
 
 function openBrowser(url: string): void {
 	const platform = process.platform;
+	let cmd: string;
+	let args: string[];
 	if (platform === "darwin") {
-		exec(`open "${url}"`);
+		cmd = "open";
+		args = [url];
 	} else if (platform === "win32") {
-		exec(`start "" "${url}"`);
+		cmd = "cmd";
+		args = ["/c", "start", "", url];
 	} else {
-		exec(`xdg-open "${url}"`);
+		cmd = "xdg-open";
+		args = [url];
 	}
+	spawn(cmd, args, { stdio: "ignore", detached: true }).unref();
 }
 
 // =============================================================================

@@ -7,7 +7,7 @@
  * Disable: PI_FREE_MODELS_FILE_LOG=false
  */
 
-import { appendFileSync, existsSync, mkdirSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, statSync, renameSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
@@ -48,15 +48,35 @@ function formatMessage(entry: LogEntry): string {
 
 const HOME_DIR = process.env.HOME || process.env.USERPROFILE || "";
 const DEFAULT_LOG_PATH = join(HOME_DIR, ".pi", "free-models.log");
-const LOG_PATH = process.env.PI_FREE_MODELS_LOG_PATH || DEFAULT_LOG_PATH;
+export const LOG_PATH = process.env.PI_FREE_MODELS_LOG_PATH || DEFAULT_LOG_PATH;
 const FILE_LOG_ENABLED = process.env.PI_FREE_MODELS_FILE_LOG !== "false";
+export const MAX_LOG_BYTES = 5 * 1024 * 1024; // 5 MB rotation threshold
 
-function appendToFile(line: string): void {
+let rotationJustHappened = false;
+
+/** Reset rotation guard — exported for testing only. */
+export function _resetRotationGuard(): void {
+	rotationJustHappened = false;
+}
+
+export function appendToFile(line: string): void {
 	if (!FILE_LOG_ENABLED) return;
 	try {
 		const dir = dirname(LOG_PATH);
 		if (!existsSync(dir)) {
 			mkdirSync(dir, { recursive: true });
+		}
+		// Rotate if file exceeds size limit
+		if (!rotationJustHappened) {
+			try {
+				const stat = statSync(LOG_PATH);
+				if (stat.size > MAX_LOG_BYTES) {
+					renameSync(LOG_PATH, `${LOG_PATH}.1`);
+					rotationJustHappened = true;
+				}
+			} catch {
+				// File doesn't exist yet — fine
+			}
 		}
 		appendFileSync(LOG_PATH, `${line}\n`, "utf8");
 	} catch {

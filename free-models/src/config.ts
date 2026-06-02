@@ -83,7 +83,7 @@ function readRawConfigFile(): string | undefined {
 ensureConfigFile();
 
 // Resolve each value: env var takes priority over config file.
-function resolve(envKey: string, fileVal?: string): string | undefined {
+export function resolve(envKey: string, fileVal?: string): string | undefined {
 	return process.env[envKey] || (fileVal?.trim() ? fileVal : undefined);
 }
 
