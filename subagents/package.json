@@ -24,7 +24,8 @@
     "image": "https://github.com/neilurk12/pi-nano-agents/blob/main/imgs/example.png?raw=true"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",

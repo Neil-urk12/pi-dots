@@ -1,16 +1,32 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import { Type, type Static } from "typebox";
 import type { Runner } from "./runner.ts";
 import {
 	type AgentRun,
 	createInitialRun,
-	KillParams,
-	type KillArgs,
-	SpawnParams,
-	type SpawnArgs,
-	StatusParams,
-	type StatusArgs,
 	type TeamMember,
 } from "./types.ts";
+
+export const SpawnParams = Type.Object({
+	name: Type.String({ description: "Team member name (matches YAML 'name' field)" }),
+	task: Type.Optional(
+		Type.String({ description: "Override the agent's default task. Falls back to YAML 'task' when omitted." }),
+	),
+});
+
+export const KillParams = Type.Object({
+	name: Type.String({ description: "Team member name to abort" }),
+});
+
+export const StatusParams = Type.Object({
+	name: Type.Optional(
+		Type.String({ description: "Specific agent to inspect; omit to list every team member" }),
+	),
+});
+
+export type SpawnArgs = Static<typeof SpawnParams>;
+export type KillArgs = Static<typeof KillParams>;
+export type StatusArgs = Static<typeof StatusParams>;
 
 const asTextContent = (text: string) => ({ type: "text" as const, text });
 

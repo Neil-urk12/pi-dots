@@ -1,5 +1,10 @@
 import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
-import { AGENT_PALETTE, type AgentRun, type AgentState, type TeamMember } from "./types.ts";
+import type { AgentRun, AgentState, TeamMember } from "./types.ts";
+
+export const AGENT_PALETTE: readonly string[] = [
+	"#e06363", "#7ad9d9", "#f0a060", "#80b8e0", "#f0c060", "#7a9aff",
+	"#c0d860", "#b48cff", "#80c878", "#d880e0", "#5dd4a3", "#f0a0c0",
+];
 
 const FEATURE_COLOR_HEX = "#1a1a1a";
 const FACE_COLUMN_COUNT = 3;
