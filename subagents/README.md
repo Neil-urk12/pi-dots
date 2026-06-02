@@ -2,11 +2,11 @@
 
 A pi extension that registers a single `subagent` tool with three agents:
 
-| Agent | Tools | Model | Purpose |
-|-------|-------|-------|---------|
-| **blitz** | read, grep, find, ls | claude-haiku-4-5 | Fast codebase recon |
-| **seeker** | web_search, web_fetch | claude-sonnet-4-6 | Web research |
-| **grind** | read, write, edit, bash_guard | claude-sonnet-4-6 | Code changes |
+| Agent | Tools | Purpose |
+|-------|-------|--------|
+| **blitz** | read, grep, find, ls | Fast codebase recon |
+| **seeker** | web_search, web_fetch | Web research |
+| **grind** | read, write, edit, bash_guard | Code changes |
 
 ## Usage
 
@@ -34,16 +34,14 @@ Optional `config.json` next to `index.ts` in the extension directory, or at `~/.
 {
   "maxConcurrency": 4,
   "models": {
-    "blitz": "anthropic/claude-haiku-4-5",
-    "seeker": "anthropic/claude-sonnet-4-6",
-    "grind": "anthropic/claude-sonnet-4-6"
+    "seeker": "anthropic/claude-sonnet-4-6"
   }
 }
 ```
 
 **All options:**
 - `maxConcurrency` — max parallel subagents (default: `4`)
-- `models` — per-agent model overrides. Falls back to hardcoded defaults, then `anthropic/claude-sonnet-4-6`
+- `models` — per-agent model overrides. Inherits the parent model by default.
 
 ## UI
 
@@ -72,7 +70,7 @@ Frontmatter fields:
 - **name** (required) — unique agent name, used in `{ agent: "my-agent" }` calls
 - **description** — short description
 - **tools** — comma-separated list of tools the agent needs (builtin or extension)
-- **model** — model identifier (defaults to `anthropic/claude-sonnet-4-6`)
+- **model** — model identifier (inherits parent model if omitted)
 
 The markdown body becomes the agent's system prompt.
 
@@ -89,7 +87,7 @@ interface AgentConfig {
   name: string;
   description: string;
   tools: string[];
-  model: string;
+  model?: string;
   systemPrompt: string;
   filePath: string;
 }
@@ -115,7 +113,7 @@ function registerMyAgents(): void {
         name: frontmatter.name,
         description: frontmatter.description || "",
         tools,
-        model: frontmatter.model || "anthropic/claude-sonnet-4-6",
+        model: frontmatter.model || undefined,
         systemPrompt: body,
         filePath,
       });

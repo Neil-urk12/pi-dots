@@ -5,6 +5,7 @@ import { loadConfig } from "./src/config";
 import { getAgents, loadAgents } from "./src/registry";
 import { createSubagentRunner } from "./src/runner";
 import { registerSubagentCommands } from "./src/dispatcher";
+import { parseParentModel } from "./src/settings";
 
 export type { AgentConfig } from "./src/types";
 export { registerAgent, unregisterAgent } from "./src/registry";
@@ -54,7 +55,7 @@ export default function (pi: ExtensionAPI) {
 	const maxConcurrency = config.maxConcurrency ?? 4;
 
 	// Track parent model so subagents inherit it by default
-	let parentModel: string | undefined;
+	let parentModel = parseParentModel();
 	try {
 		pi.on("model_select", (evt: ModelSelectEvent) => {
 			const model = evt?.model;

@@ -14,7 +14,7 @@ const mockParseFrontmatter = vi.mocked(parseFrontmatter);
 
 // Import after mocks
 const registryModule = await import("./registry");
-const { loadAgents, getAgents, registerAgent, unregisterAgent, resetAgents, DEFAULT_MODELS, validateThinking } = registryModule;
+	const { loadAgents, getAgents, registerAgent, unregisterAgent, resetAgents, validateThinking } = registryModule;
 
 describe("loadAgents", () => {
 	beforeEach(() => {
@@ -23,7 +23,6 @@ describe("loadAgents", () => {
 	});
 
 	it("uses parentModel as fallback when no frontmatter or default model exists", () => {
-		// Arrange
 		mockFs.existsSync.mockReturnValue(true);
 		(mockFs.readdirSync as any).mockReturnValue(["test-agent.md"]);
 		(mockFs.readFileSync as any).mockReturnValue("---\nname: test-agent\ndescription: test\n---\nSystem prompt");
@@ -32,10 +31,8 @@ describe("loadAgents", () => {
 			body: "System prompt",
 		});
 
-		// Act
 		loadAgents("/fake/ext", { models: {} }, "anthropic/claude-sonnet-4-6");
 
-		// Assert
 		const agents = getAgents();
 		expect(agents).toHaveLength(1);
 		expect(agents[0].model).toBe("anthropic/claude-sonnet-4-6");
@@ -71,7 +68,7 @@ describe("loadAgents", () => {
 		expect(agents[0].model).toBe("google/gemini-2.5-pro");
 	});
 
-	it("DEFAULT_MODELS take precedence over parentModel", () => {
+	it("model is undefined when no source provides one", () => {
 		mockFs.existsSync.mockReturnValue(true);
 		(mockFs.readdirSync as any).mockReturnValue(["blitz.md"]);
 		(mockFs.readFileSync as any).mockReturnValue("---\nname: blitz\ndescription: test\n---\nSystem prompt");
@@ -80,13 +77,13 @@ describe("loadAgents", () => {
 			body: "System prompt",
 		});
 
-		loadAgents("/fake/ext", { models: {} }, "anthropic/claude-sonnet-4-6");
+		loadAgents("/fake/ext", { models: {} });
 
 		const agents = getAgents();
-		expect(agents[0].model).toBe(DEFAULT_MODELS.blitz); // "anthropic/claude-haiku-4-5"
+		expect(agents[0].model).toBeUndefined();
 	});
 
-	it("falls back to hardcoded default when no parentModel provided", () => {
+	it("inherits parentModel when provided", () => {
 		mockFs.existsSync.mockReturnValue(true);
 		(mockFs.readdirSync as any).mockReturnValue(["custom.md"]);
 		(mockFs.readFileSync as any).mockReturnValue("---\nname: custom\ndescription: test\n---\nSystem prompt");
@@ -95,15 +92,13 @@ describe("loadAgents", () => {
 			body: "System prompt",
 		});
 
-		loadAgents("/fake/ext", { models: {} });
+		loadAgents("/fake/ext", { models: {} }, "anthropic/claude-sonnet-4-6");
 
 		const agents = getAgents();
 		expect(agents[0].model).toBe("anthropic/claude-sonnet-4-6");
 	});
 
 	it("preserves dynamically registered agents across loadAgents calls", () => {
-		// This test verifies that loadAgents doesn't wipe agents
-		// registered via registerAgent() by other extensions
 		mockFs.existsSync.mockReturnValue(true);
 		(mockFs.readdirSync as any).mockReturnValue(["builtin.md"]);
 		(mockFs.readFileSync as any).mockReturnValue("---\nname: builtin\ndescription: test\n---\nSystem prompt");
@@ -112,11 +107,9 @@ describe("loadAgents", () => {
 			body: "System prompt",
 		});
 
-		// Initial load
 		loadAgents("/fake/ext", { models: {} });
 		expect(getAgents()).toHaveLength(1);
 
-		// Another extension registers an agent dynamically
 		registerAgent({
 			name: "dynamic-agent",
 			description: "registered by another extension",
@@ -127,12 +120,9 @@ describe("loadAgents", () => {
 		});
 		expect(getAgents()).toHaveLength(2);
 
-		// Model change triggers loadAgents again
-		(mockFs.readdirSync as any).mockReturnValue(["builtin.md"]); // same files on disk
+		(mockFs.readdirSync as any).mockReturnValue(["builtin.md"]);
 		loadAgents("/fake/ext", { models: {} }, "anthropic/claude-sonnet-4-6");
 
-		// Dynamic agents should survive the reload
-		// This test expects dynamic-agent to survive the reload
 		const agents = getAgents();
 		expect(agents).toHaveLength(2);
 		expect(agents.find(a => a.name === "dynamic-agent")).toBeDefined();
