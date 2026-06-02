@@ -1,0 +1,52 @@
+{
+	"name": "@neilurk12/pi-free-models",
+	"version": "1.0.0",
+	"type": "module",
+	"description": "Free model providers for Pi — Kilo and OpenCode with free/paid filtering",
+	"main": "./dist/index.js",
+	"module": "./dist/index.js",
+	"exports": {
+		".": {
+			"import": "./dist/index.js"
+		}
+	},
+	"keywords": [
+		"pi-package",
+		"pi-extension",
+		"free-models",
+		"kilo",
+		"opencode"
+	],
+	"license": "MIT",
+	"engines": {
+		"node": ">=18"
+	},
+	"files": [
+		"dist/",
+		"README.md"
+	],
+	"scripts": {
+		"build": "tsup",
+		"dev": "tsup --watch",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"format": "prettier --write .",
+		"format:check": "prettier --check ."
+	},
+	"peerDependencies": {
+		"@earendil-works/pi-ai": "*",
+		"@earendil-works/pi-coding-agent": "*",
+		"@earendil-works/pi-tui": "*"
+	},
+	"devDependencies": {
+		"prettier": "^3.8.3",
+		"tsup": "^8.5.1",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.6"
+	},
+	"pi": {
+		"extensions": [
+			"./dist/index.js"
+		]
+	}
+}
