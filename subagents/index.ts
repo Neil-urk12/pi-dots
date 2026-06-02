@@ -1,80 +1,100 @@
-import * as fs from "node:fs";
-import * as path from "node:path";
-import type { ExtensionAPI, ModelSelectEvent } from "@mariozechner/pi-coding-agent";
-import { loadConfig } from "./src/config";
-import { getAgents, loadAgents } from "./src/registry";
-import { createSubagentRunner } from "./src/runner";
-import { registerSubagentCommands } from "./src/dispatcher";
-import { parseParentModel } from "./src/settings";
+import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { createRunner, type Runner } from "./src/runner.ts";
+import { buildSystemPromptAddition } from "./src/system-prompt.ts";
+import { loadTeam } from "./src/team.ts";
+import { registerTools } from "./src/tools.ts";
+import { LIVE_AGENT_STATES, type TeamMember } from "./src/types.ts";
+import { renderChips } from "./src/widget.ts";
 
-export type { AgentConfig } from "./src/types";
-export { registerAgent, unregisterAgent } from "./src/registry";
+const WIDGET_KEY = "nano-team";
+const FLUSH_DEBOUNCE_MS = 50;
+const ANIMATION_FRAME_MS = 300;
+const FALLBACK_TERMINAL_COLS = 80;
 
-const BUILTIN_TOOLS = new Set([
-	"read",
-	"write",
-	"edit",
-	"bash",
-	"grep",
-	"find",
-	"ls",
-]);
+type WidgetFlusher = Readonly<{ schedule: () => void; cancel: () => void }>;
 
-const EXT_BASE = path.join(
-	process.env.HOME || "~",
-	".pi",
-	"agent",
-	"extensions",
-);
-const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
-	web_search: path.join(EXT_BASE, "web-search", "index.ts"),
-	web_fetch: path.join(EXT_BASE, "web-fetch", "index.ts"),
-	bash_guard: path.join(
-		path.dirname(new URL(import.meta.url).pathname),
-		"tools",
-		"bash-guard.ts",
-	),
+const createWidgetFlusher = (
+	ctx: ExtensionContext,
+	getRunner: () => Runner | null,
+	getTeam: () => ReadonlyMap<string, TeamMember>,
+): WidgetFlusher => {
+	let pendingTimer: NodeJS.Timeout | null = null;
+	let animationTimer: NodeJS.Timeout | null = null;
+
+	const stopAnimation = (): void => {
+		if (!animationTimer) return;
+		clearInterval(animationTimer);
+		animationTimer = null;
+	};
+
+	const flush = (): void => {
+		pendingTimer = null;
+		const runner = ctx.hasUI ? getRunner() : null;
+		if (!runner) {
+			stopAnimation();
+			return;
+		}
+		const runs = runner.list();
+		const lines = renderChips(
+			runs,
+			getTeam(),
+			process.stdout.columns ?? FALLBACK_TERMINAL_COLS,
+			ctx.ui.theme,
+			Math.floor(Date.now() / ANIMATION_FRAME_MS),
+		);
+		ctx.ui.setWidget(WIDGET_KEY, lines.length > 0 ? lines : undefined, { placement: "aboveEditor" });
+
+		const hasLiveAgent = runs.some((run) => LIVE_AGENT_STATES.has(run.state));
+		if (hasLiveAgent && !animationTimer) {
+			animationTimer = setInterval(flush, ANIMATION_FRAME_MS);
+			animationTimer.unref?.();
+		} else if (!hasLiveAgent) {
+			stopAnimation();
+		}
+	};
+
+	return {
+		schedule: () => {
+			if (pendingTimer) return;
+			pendingTimer = setTimeout(flush, FLUSH_DEBOUNCE_MS);
+		},
+		cancel: () => {
+			if (pendingTimer) {
+				clearTimeout(pendingTimer);
+				pendingTimer = null;
+			}
+			stopAnimation();
+		},
+	};
 };
 
-function resolvePiBinary(): { command: string; baseArgs: string[] } {
-	const entry = process.argv[1];
-	if (entry) {
-		try {
-			const realEntry = fs.realpathSync(entry);
-			if (/\.(?:mjs|cjs|js)$/i.test(realEntry)) {
-				return { command: process.execPath, baseArgs: [realEntry] };
-			}
-		} catch {}
-	}
-	return { command: "pi", baseArgs: [] };
-}
+export default function nanoTeam(pi: ExtensionAPI): void {
+	let team: ReadonlyMap<string, TeamMember> = new Map();
+	let runner: Runner | null = null;
+	let flusher: WidgetFlusher | null = null;
 
-export default function (pi: ExtensionAPI) {
-	const extDir = path.dirname(new URL(import.meta.url).pathname);
-	const config = loadConfig(extDir);
-	const maxConcurrency = config.maxConcurrency ?? 4;
+	pi.on("session_start", async (_event, ctx) => {
+		const result = await loadTeam(ctx.cwd);
+		team = result.team;
 
-	// Track parent model so subagents inherit it by default
-	let parentModel = parseParentModel();
-	try {
-		pi.on("model_select", (evt: ModelSelectEvent) => {
-			const model = evt?.model;
-			if (model?.id && model?.provider) {
-				parentModel = `${model.provider}/${model.id}`;
-				loadAgents(extDir, config, parentModel);
-			}
-		});
-	} catch (err) {
-		console.error("[subagents] Failed to register model_select handler:", err);
-	}
+		if (ctx.hasUI && result.errors.length > 0) {
+			ctx.ui.notify(`nano-team: ${result.errors.join("; ")}`, "warning");
+		}
 
-	loadAgents(extDir, config, parentModel);
-
-	const runner = createSubagentRunner({
-		piBin: resolvePiBinary(),
-		builtinTools: BUILTIN_TOOLS,
-		customToolExtensions: CUSTOM_TOOL_EXTENSIONS,
+		flusher = createWidgetFlusher(ctx, () => runner, () => team);
+		runner = createRunner(ctx.cwd, () => flusher?.schedule());
+		registerTools(pi, runner, () => team);
+		flusher.schedule();
 	});
 
-	registerSubagentCommands(pi, getAgents, runner, maxConcurrency, extDir);
+	pi.on("before_agent_start", (event) => ({
+		systemPrompt: `${event.systemPrompt}\n\n${buildSystemPromptAddition(team)}`,
+	}));
+
+	pi.on("session_shutdown", () => {
+		flusher?.cancel();
+		runner?.shutdown();
+		runner = null;
+		flusher = null;
+	});
 }
