@@ -1,56 +1,40 @@
 {
-  "name": "neilurk12/pi-subagents",
-  "version": "0.0.1",
-  "description": "Minimal subagents extension for pi coding agent — delegate tasks to scout, researcher, and worker agents with single and parallel execution.",
+  "name": "@neilurk12/pi-nano-agents",
+  "version": "0.1.0",
+  "description": "A tiny pi.dev extension. It doesn't really do much — just runs your subagents and shows them as a compact little chip row above the editor so you can see who's working.",
   "type": "module",
-  "keywords": [
-    "pi-package",
-    "pi-extension",
-    "subagents",
-    "agent"
-  ],
   "license": "MIT",
-  "scripts": {
-    "build": "tsup && rm -rf dist/agents dist/tools && cp -r agents dist/agents && cp -r tools dist/tools",
-    "dev": "tsup --watch",
-    "prepare": "tsup",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "lint": "oxlint"
+  "author": "Neil Vallecer <neilvallecer12@gmail.com>",
+  "contributors": ["Sergey Golovin"],
+  "homepage": "https://github.com/neilurk12/pi-nano-agents",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/neilurk12/pi-nano-agents.git"
   },
-  "files": [
-    "dist",
-    "README.md"
+  "bugs": {
+    "url": "https://github.com/neilurk12/pi-nano-agents/issues"
+  },
+  "keywords": [
+    "pi-package"
   ],
   "pi": {
     "extensions": [
-      "./dist/index.js"
-    ]
+      "./index.ts"
+    ],
+    "image": "https://github.com/neilurk12/pi-nano-agents/blob/main/imgs/example.png?raw=true"
   },
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "exports": {
-    ".": "./dist/index.js"
-  },
-  "dependencies": {
-    "typebox": "*"
+  "scripts": {
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@mariozechner/pi-coding-agent": "*",
-    "@mariozechner/pi-tui": "*"
+    "typebox": "*"
+  },
+  "dependencies": {
+    "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@mariozechner/pi-coding-agent": "^0.73.1",
-    "@mariozechner/pi-tui": "^0.73.1",
-    "@types/node": "^25.6.2",
-    "oxlint": "^1.63.0",
-    "tsup": "^8.5.1",
-    "typescript": "^5.8.0",
-    "vitest": "^4.1.8"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0"
   }
 }
