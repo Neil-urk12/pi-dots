@@ -2,7 +2,7 @@ export interface AgentConfig {
 	name: string;
 	description: string;
 	tools: string[];
-	model: string;
+	model?: string;
 	thinking?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 	systemPrompt: string;
 	filePath: string;
@@ -54,4 +54,11 @@ export interface Details {
 export interface ExtensionConfig {
 	maxConcurrency?: number;
 	models?: Record<string, string | { model: string; thinking: string }>;
+}
+
+/** Content block from pi's JSON mode message output. */
+export interface ContentBlock {
+	type: string;
+	text?: string;
+	[key: string]: unknown;
 }

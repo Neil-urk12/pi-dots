@@ -11,19 +11,26 @@
   ],
   "license": "MIT",
   "scripts": {
+    "build": "tsup && rm -rf dist/agents dist/tools && cp -r agents dist/agents && cp -r tools dist/tools",
+    "dev": "tsup --watch",
+    "prepare": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "oxlint"
   },
   "files": [
-    "index.ts",
-    "src",
-    "agents",
-    "tools",
+    "dist",
     "README.md"
   ],
   "pi": {
     "extensions": [
-      "./index.ts"
+      "./dist/index.js"
     ]
+  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
   },
   "dependencies": {
     "typebox": "*"
@@ -37,6 +44,13 @@
     "@mariozechner/pi-tui": "^0.73.1",
     "@types/node": "^25.6.2",
     "oxlint": "^1.63.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.8.0",
     "vitest": "^4.1.8"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
   }
 }

@@ -1,4 +1,4 @@
-import { spawn, execSync } from "node:child_process";
+import { spawn, execFileSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -11,6 +11,7 @@ import {
 import type { AgentConfig, AgentProgress, AgentResult } from "./types";
 import { extractToolArgsPreview } from "./format";
 import { resolveProviderExtension } from "./provider-resolver";
+import { escapeRegExp, extractTextFromContent } from "./utils";
 
 export interface RunnerOptions {
 	piBin: { command: string; baseArgs: string[] };
@@ -65,7 +66,6 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 			path.join(os.tmpdir(), "pi-sub-"),
 		);
 
-		// Write system prompt to temp file
 		const promptPath = path.join(tempDir, `${agent.name}.md`);
 		await withFileMutationQueue(promptPath, async () => {
 			await fs.promises.writeFile(promptPath, agent.systemPrompt, {
@@ -83,7 +83,6 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 			"--no-skills",
 		];
 
-		// Separate builtin tools from custom tools
 		const builtinTools: string[] = [];
 		const extensionPaths = new Set<string>();
 		let providerExt: string | undefined;
@@ -96,7 +95,6 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 			}
 		}
 
-		// Add explicitly declared extensions from agent frontmatter
 		if (agent.extensions) {
 			for (const ext of agent.extensions) {
 				extensionPaths.add(ext);
@@ -106,14 +104,16 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		if (!agent.useParentExtensions) {
 			args.push("--no-extensions");
 			// Auto-include extension that provides the agent's model provider
-			const resolved = await resolveProviderExtension(
-				agent.model,
-				options.piBin.command,
-				options.piBin.baseArgs,
-			);
-			if (resolved) {
-				providerExt = resolved;
-				extensionPaths.add(resolved);
+			if (agent.model) {
+				const resolved = await resolveProviderExtension(
+					agent.model,
+					options.piBin.command,
+					options.piBin.baseArgs,
+				);
+				if (resolved) {
+					providerExt = resolved;
+					extensionPaths.add(resolved);
+				}
 			}
 		}
 
@@ -128,14 +128,13 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 			args.push("--extension", extPath);
 		}
 
-		args.push("--model", agent.model);
+		if (agent.model) args.push("--model", agent.model);
 
 		if (agent.thinking) {
 			args.push("--thinking", agent.thinking);
 		}
 		args.push("--append-system-prompt", promptPath);
 
-		// Handle long tasks by writing to file
 		if (task.length > TASK_LIMIT) {
 			const taskPath = path.join(tempDir, "task.md");
 			await withFileMutationQueue(taskPath, async () => {
@@ -165,11 +164,17 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		const deadline = Date.now() + timeoutMs;
 		const pollInterval = 1000;
 
+		const slashIdx = model.indexOf("/");
+		const pattern = slashIdx > 0
+			? escapeRegExp(model.slice(0, slashIdx)) + "\\s+" + escapeRegExp(model.slice(slashIdx + 1))
+			: escapeRegExp(model);
+		const modelRegex = new RegExp(pattern);
+
+		const args = [...baseArgs, "--no-extensions", "--extension", providerExt, "--list-models"];
 		while (Date.now() < deadline) {
 			try {
-				const cmd = [command, ...baseArgs, "--no-extensions", "--extension", providerExt, "--list-models"].join(" ");
-				const output = execSync(cmd, { encoding: "utf-8", timeout: 5000 });
-				if (output.includes(model)) return;
+				const output = execFileSync(command, args, { encoding: "utf-8", timeout: 5000 });
+				if (modelRegex.test(output)) return;
 			} catch {
 				// pi list failed — retry
 			}
@@ -177,17 +182,6 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		}
 	}
 
-	function extractTextFromContent(content: unknown): string {
-		if (!content) return "";
-		if (typeof content === "string") return content;
-		if (Array.isArray(content)) {
-			return content
-				.filter((c: any) => c.type === "text")
-				.map((c: any) => c.text)
-				.join("\n");
-		}
-		return "";
-	}
 
 	async function run(
 		agent: AgentConfig,
@@ -199,7 +193,7 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		const { args, tempDir, providerExt } = await buildPiArgs(agent, task, cwd);
 
 		// Wait for model to be available if extension-provided (cold-start mitigation)
-		if (providerExt) {
+		if (providerExt && agent.model) {
 			await waitForModel(agent.model, providerExt);
 		}
 
@@ -256,79 +250,83 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 					const evt = JSON.parse(line) as any;
 					progress.durationMs = Date.now() - startTime;
 
-					if (evt.type === "tool_execution_start") {
-						progress.toolCount++;
-						progress.currentTool = evt.toolName;
-						progress.currentToolArgs = extractToolArgsPreview(
-							(evt.args || {}) as Record<string, unknown>,
-						);
-						fireUpdate();
-					}
-
-					if (evt.type === "tool_execution_end") {
-						if (progress.currentTool) {
-							progress.recentTools.push({
-								tool: progress.currentTool,
-								args: progress.currentToolArgs || "",
-							});
-							// Keep last 20
-							if (progress.recentTools.length > 20) {
-								progress.recentTools.splice(
-									0,
-									progress.recentTools.length - 20,
-								);
-							}
-						}
-						progress.currentTool = undefined;
-						progress.currentToolArgs = undefined;
-						fireUpdate();
-					}
-
-					if (evt.type === "tool_result_end") {
-						fireUpdate();
-					}
-
-					if (evt.type === "message_end" && evt.message) {
-						if (evt.message.role === "assistant") {
-							result.usage.turns++;
-							const u = evt.message.usage;
-							if (u) {
-								result.usage.input += u.input || 0;
-								result.usage.output += u.output || 0;
-								result.usage.cacheRead += u.cacheRead || 0;
-								result.usage.cacheWrite += u.cacheWrite || 0;
-								result.usage.cost += u.cost?.total || 0;
-								progress.tokens =
-									result.usage.input + result.usage.output;
-							}
-							if (evt.message.model) result.model = evt.message.model;
-							if (evt.message.errorMessage)
-								progress.error = evt.message.errorMessage;
-
-							const text = extractTextFromContent(evt.message.content);
-							if (text) {
-								result.output = text;
-								// Extract just the prose "thinking" text — skip code blocks
-								const proseLines: string[] = [];
-								let inCodeBlock = false;
-								for (const line of text.split("\n")) {
-									if (line.trimStart().startsWith("```")) {
-										inCodeBlock = !inCodeBlock;
-										continue;
-									}
-									if (!inCodeBlock && line.trim()) {
-										proseLines.push(line.trim());
-									}
-								}
-								if (proseLines.length > 0) {
-									progress.lastMessage = proseLines
-										.slice(0, 3)
-										.join(" ");
-								}
-							}
+					switch (evt.type) {
+						case "tool_execution_start": {
+							progress.toolCount++;
+							progress.currentTool = evt.toolName;
+							progress.currentToolArgs = extractToolArgsPreview(
+								(evt.args || {}) as Record<string, unknown>,
+							);
+							fireUpdate();
+							break;
 						}
 
-						fireUpdate();
+						case "tool_execution_end": {
+							if (progress.currentTool) {
+								progress.recentTools.push({
+									tool: progress.currentTool,
+									args: progress.currentToolArgs || "",
+								});
+								if (progress.recentTools.length > 20) {
+									progress.recentTools.splice(
+										0,
+										progress.recentTools.length - 20,
+									);
+								}
+							}
+							progress.currentTool = undefined;
+							progress.currentToolArgs = undefined;
+							fireUpdate();
+							break;
+						}
+
+						case "tool_result_end":
+							fireUpdate();
+							break;
+
+						case "message_end": {
+							if (evt.message) {
+								if (evt.message.role === "assistant") {
+									result.usage.turns++;
+									const u = evt.message.usage;
+									if (u) {
+										result.usage.input += u.input || 0;
+										result.usage.output += u.output || 0;
+										result.usage.cacheRead += u.cacheRead || 0;
+										result.usage.cacheWrite += u.cacheWrite || 0;
+										result.usage.cost += u.cost?.total || 0;
+										progress.tokens =
+											result.usage.input + result.usage.output;
+									}
+									if (evt.message.model) result.model = evt.message.model;
+									if (evt.message.errorMessage)
+										progress.error = evt.message.errorMessage;
+
+									const text = extractTextFromContent(evt.message.content);
+									if (text) {
+										result.output = text;
+										const proseLines: string[] = [];
+										let inCodeBlock = false;
+										for (const line of text.split("\n")) {
+											if (line.trimStart().startsWith("```")) {
+												inCodeBlock = !inCodeBlock;
+												continue;
+											}
+											if (!inCodeBlock && line.trim()) {
+												proseLines.push(line.trim());
+											}
+										}
+										if (proseLines.length > 0) {
+											progress.lastMessage = proseLines
+												.slice(0, 3)
+												.join(" ");
+										}
+									}
+								}
+								fireUpdate();
+							}
+							break;
+						}
 					}
 				} catch {
 					// Non-JSON lines are expected
@@ -369,7 +367,6 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 			}
 		});
 
-		// Cleanup temp dir
 		try {
 			fs.rmSync(tempDir, { recursive: true, force: true });
 		} catch {}
@@ -381,7 +378,6 @@ export function createSubagentRunner(options: RunnerOptions): SubagentRunner {
 		if (progress.error)
 			result.output = result.output || `Error: ${progress.error}`;
 
-		// Truncate output if very large
 		if (result.output.length > DEFAULT_MAX_BYTES) {
 			const trunc = truncateHead(result.output, {
 				maxLines: DEFAULT_MAX_LINES,

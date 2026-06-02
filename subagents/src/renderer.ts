@@ -8,7 +8,7 @@ import {
 	Spacer,
 	Text,
 } from "@mariozechner/pi-tui";
-import type { AgentResult, Details } from "./types";
+import type { AgentResult, ContentBlock, Details } from "./types";
 import { formatDuration, formatTokens, truncLine } from "./format";
 
 export type Theme = ExtensionContext["ui"]["theme"];
@@ -21,7 +21,7 @@ export interface SubagentCallArgs {
 }
 
 export interface SubagentRenderResult {
-	content: Array<{ type: string; text: string }>;
+	content: ContentBlock[];
 	details?: Details;
 }
 
