@@ -1,0 +1,448 @@
+import { describe, expect, test } from "bun:test";
+import { PassThrough } from "node:stream";
+import { createRunner } from "../runner.ts";
+import type { ProcessFactory, ProcessHandle } from "../process.ts";
+import type { TeamMember } from "../types.ts";
+
+// ── Fake Process Factory ────────────────────────────────────────────
+
+type FakeHandle = ProcessHandle & {
+	emitStdout(data: string): void;
+	emitStderr(data: string): void;
+	emitClose(code: number | null): void;
+	emitError(error: Error): void;
+	killed: boolean;
+};
+
+type SpawnCall = {
+	command: string;
+	args: readonly string[];
+	instructions: string;
+	cwd: string;
+};
+
+const createFakeFactory = (): { factory: ProcessFactory; calls: SpawnCall[]; handles: FakeHandle[] } => {
+	const calls: SpawnCall[] = [];
+	const handles: FakeHandle[] = [];
+
+	const factory: ProcessFactory = {
+		async start(command, args, instructions, cwd): Promise<ProcessHandle> {
+			calls.push({ command, args, instructions, cwd });
+
+			const stdout = new PassThrough();
+			const stderr = new PassThrough();
+			const closeListeners: Array<(code: number | null) => void> = [];
+			const errorListeners: Array<(error: Error) => void> = [];
+			let killed = false;
+
+			const handle: FakeHandle = {
+				stdout,
+				stderr,
+				pid: 1000 + handles.length,
+				on(event: "close" | "error", listener: ((code: number | null) => void) | ((error: Error) => void)) {
+					if (event === "close") closeListeners.push(listener as (code: number | null) => void);
+					else errorListeners.push(listener as (error: Error) => void);
+				},
+				kill() {
+					killed = true;
+				},
+				emitStdout(data: string) {
+					stdout.write(data);
+				},
+				emitStderr(data: string) {
+					stderr.write(data);
+				},
+				emitClose(code: number | null) {
+					stdout.end();
+					stderr.end();
+					for (const fn of closeListeners) fn(code);
+				},
+				emitError(error: Error) {
+					for (const fn of errorListeners) fn(error);
+				},
+				get killed() {
+					return killed;
+				},
+			};
+
+			handles.push(handle);
+			return handle;
+		},
+	};
+
+	return { factory, calls, handles };
+};
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+const member = (name = "test-agent", task = "do something"): TeamMember =>
+	Object.freeze({
+		name,
+		role: "coder",
+		instructions: "You are a test agent.",
+		task,
+		model: "test-model",
+		sourceFile: "test.yaml",
+	});
+
+const jsonLine = (event: Record<string, unknown>): string => JSON.stringify(event) + "\n";
+
+const yieldToRunner = (): Promise<void> => new Promise((r) => setTimeout(r, 1));
+
+// ── Tests ────────────────────────────────────────────────────────────
+
+describe("Runner lifecycle", () => {
+	test("transitions through thinking → working → done on normal completion", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member(), "test task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		handle.emitStdout(jsonLine({ type: "message_start" }));
+		handle.emitStdout(
+			jsonLine({
+				type: "tool_execution_start",
+				toolName: "read",
+				args: { path: "/src/main.ts" },
+			}),
+		);
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "All done." }],
+					stopReason: "end_turn",
+				},
+			}),
+		);
+		handle.emitClose(0);
+
+		const run = await promise;
+		expect(run.state).toBe("done");
+		expect(run.transcript).toBe("All done.");
+		expect(run.lastError).toBeNull();
+		expect(run.endedAt).toBeGreaterThan(0);
+	});
+
+	test("captures non-zero exit as error", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member(), "test task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		handle.emitStderr("something went wrong");
+		handle.emitClose(1);
+
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toBe("something went wrong");
+	});
+
+	test("captures error event message", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member(), "test task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		handle.emitError(new Error("spawn ENOENT"));
+		handle.emitClose(null);
+
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toBe("spawn ENOENT");
+	});
+
+	test("handles abort signal gracefully", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+		const controller = new AbortController();
+
+		const promise = runner.spawn(member(), "test task", controller.signal);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		controller.abort();
+		expect(handle.killed).toBe(true);
+
+		handle.emitClose(null);
+
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toBe("aborted");
+	});
+
+	test("rejects concurrent spawn of same agent", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+		const m = member();
+
+		const first = runner.spawn(m, "task 1", undefined);
+		await yieldToRunner();
+
+		await expect(runner.spawn(m, "task 2", undefined)).rejects.toThrow("already running");
+
+		handles[0]!.emitClose(0);
+		await first;
+	});
+
+	test("kill returns true when agent is running", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member(), "test task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		expect(runner.kill("test-agent")).toBe(true);
+		expect(handle.killed).toBe(true);
+
+		handle.emitClose(null);
+		await promise;
+	});
+
+	test("kill returns false when agent is not running", () => {
+		const { factory } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		expect(runner.kill("nonexistent")).toBe(false);
+	});
+
+	test("list returns all runs", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const p1 = runner.spawn(member("agent-1"), "task 1", undefined);
+		const p2 = runner.spawn(member("agent-2"), "task 2", undefined);
+		await yieldToRunner();
+
+		expect(runner.list()).toHaveLength(2);
+
+		handles[0]!.emitClose(0);
+		handles[1]!.emitClose(0);
+		await Promise.all([p1, p2]);
+	});
+
+	test("get returns specific run", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member("agent-1"), "task 1", undefined);
+		await yieldToRunner();
+
+		const run = runner.get("agent-1");
+		expect(run).toBeDefined();
+		expect(run!.name).toBe("agent-1");
+		expect(run!.state).toBe("thinking");
+
+		handles[0]!.emitClose(0);
+		await promise;
+	});
+
+	test("passes instructions and args to factory", async () => {
+		const { factory, handles, calls } = createFakeFactory();
+		const runner = createRunner("/test/cwd", () => {}, 4, factory);
+
+		const promise = runner.spawn(member("agent-1", "default task"), "override task", undefined);
+		await yieldToRunner();
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]!.instructions).toBe("You are a test agent.");
+		expect(calls[0]!.cwd).toBe("/test/cwd");
+		expect(calls[0]!.args).toContain("--model");
+		expect(calls[0]!.args).toContain("test-model");
+
+		handles[0]!.emitClose(0);
+		await promise;
+	});
+
+	test("calls onChange when run state updates", async () => {
+		const { factory, handles } = createFakeFactory();
+		let changeCount = 0;
+		const runner = createRunner("/test", () => { changeCount++; }, 4, factory);
+
+		const promise = runner.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+		const initialChanges = changeCount;
+
+		handle.emitStdout(
+			jsonLine({
+				type: "tool_execution_start",
+				toolName: "read",
+				args: { path: "/test" },
+			}),
+		);
+		expect(changeCount).toBeGreaterThan(initialChanges);
+
+		handle.emitClose(0);
+		await promise;
+	});
+
+	test("shutdown kills all running agents", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const p1 = runner.spawn(member("a1"), "t1", undefined);
+		const p2 = runner.spawn(member("a2"), "t2", undefined);
+		await yieldToRunner();
+
+		runner.shutdown();
+
+		expect(handles[0]!.killed).toBe(true);
+		expect(handles[1]!.killed).toBe(true);
+
+		handles[0]!.emitClose(null);
+		handles[1]!.emitClose(null);
+		await Promise.all([p1, p2]);
+	});
+});
+
+describe("Runner concurrency", () => {
+	test("semaphore limits concurrent spawns", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 2, factory);
+
+		const p1 = runner.spawn(member("a1"), "t1", undefined);
+		const p2 = runner.spawn(member("a2"), "t2", undefined);
+		const p3 = runner.spawn(member("a3"), "t3", undefined);
+
+		await new Promise((r) => setTimeout(r, 10));
+		expect(handles).toHaveLength(2);
+
+		handles[0]!.emitClose(0);
+		await p1;
+
+		await new Promise((r) => setTimeout(r, 10));
+		expect(handles).toHaveLength(3);
+
+		handles[1]!.emitClose(0);
+		handles[2]!.emitClose(0);
+		await Promise.all([p2, p3]);
+	});
+});
+
+describe("Runner stream parsing integration", () => {
+	test("accumulates transcript across multiple message_end events", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		handle.emitStdout(jsonLine({ type: "message_start" }));
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "Part 1. " }],
+				},
+			}),
+		);
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "Part 2." }],
+					stopReason: "end_turn",
+				},
+			}),
+		);
+		handle.emitClose(0);
+
+		const run = await promise;
+		expect(run.transcript).toBe("Part 1. Part 2.");
+		expect(run.state).toBe("done");
+	});
+
+	test("captures errorMessage from stream as error state", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		handle.emitStdout(jsonLine({ type: "message_start" }));
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [],
+					errorMessage: "context window exceeded",
+				},
+			}),
+		);
+		handle.emitClose(0);
+
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toBe("context window exceeded");
+	});
+
+	test("ignores malformed JSON lines without crashing", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		handle.emitStdout("not json\n");
+		handle.emitStdout("{incomplete\n");
+		handle.emitStdout(jsonLine({ type: "message_start" }));
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "recovered" }],
+					stopReason: "end_turn",
+				},
+			}),
+		);
+		handle.emitClose(0);
+
+		const run = await promise;
+		expect(run.state).toBe("done");
+		expect(run.transcript).toBe("recovered");
+	});
+
+	test("handles partial lines buffered across chunks", async () => {
+		const { factory, handles } = createFakeFactory();
+		const runner = createRunner("/test", () => {}, 4, factory);
+
+		const promise = runner.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		const fullLine = jsonLine({ type: "message_start" });
+		handle.emitStdout(fullLine.slice(0, 10));
+		handle.emitStdout(fullLine.slice(10));
+
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "ok" }],
+					stopReason: "end_turn",
+				},
+			}),
+		);
+		handle.emitClose(0);
+
+		const run = await promise;
+		expect(run.state).toBe("done");
+	});
+});
