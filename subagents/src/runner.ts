@@ -1,9 +1,8 @@
-import { type ChildProcess, spawn } from "node:child_process";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
-import { type AgentRun, type AgentState, createInitialRun, LIVE_AGENT_STATES, type TeamMember } from "./types.ts";
-import { type StreamAccumulator, type StreamEvent, applyStreamEvent, createAccumulator } from "./stream-parser.ts";
+import { type AgentRun, createInitialRun, LIVE_AGENT_STATES, type TeamMember } from "./types.ts";
+import { type StreamEvent, applyStreamEvent, createAccumulator } from "./stream-parser.ts";
+import { type ProcessFactory, type ProcessHandle, ChildProcessAdapter } from "./process.ts";
 
 export type Runner = Readonly<{
 	spawn(member: TeamMember, task: string, signal: AbortSignal | undefined): Promise<AgentRun>;
@@ -13,39 +12,19 @@ export type Runner = Readonly<{
 	shutdown(): void;
 }>;
 
-const KILL_GRACE_MS = 2000;
-
 type PiInvocation = { command: string; baseArgs: readonly string[] };
 
-let cachedPiInvocation: PiInvocation | null = null;
-
 const derivePiInvocation = (): PiInvocation => {
-	if (cachedPiInvocation) return cachedPiInvocation;
 	const currentScript = process.argv[1];
 	const isBunVirtualScript = currentScript?.startsWith("/$bunfs/root/") ?? false;
 	if (currentScript && !isBunVirtualScript && fs.existsSync(currentScript)) {
-		return (cachedPiInvocation = { command: process.execPath, baseArgs: [currentScript] });
+		return { command: process.execPath, baseArgs: [currentScript] };
 	}
 	const executableName = path.basename(process.execPath).toLowerCase();
 	const isGenericRuntime = /^(node|bun)(\.exe)?$/.test(executableName);
-	return (cachedPiInvocation = isGenericRuntime
+	return isGenericRuntime
 		? { command: "pi", baseArgs: [] }
-		: { command: process.execPath, baseArgs: [] });
-};
-
-const killWithGrace = (child: ChildProcess): void => {
-	if (child.killed) return;
-	child.kill("SIGTERM");
-	setTimeout(() => {
-		if (!child.killed) child.kill("SIGKILL");
-	}, KILL_GRACE_MS).unref();
-};
-
-const writeSystemPromptFile = async (instructions: string): Promise<{ filePath: string; directory: string }> => {
-	const directory = await fs.promises.mkdtemp(path.join(os.tmpdir(), "nano-team-"));
-	const filePath = path.join(directory, "system.md");
-	await fs.promises.writeFile(filePath, instructions, { encoding: "utf-8", mode: 0o600 });
-	return { filePath, directory };
+		: { command: process.execPath, baseArgs: [] };
 };
 
 const DEFAULT_MAX_CONCURRENCY = 4;
@@ -69,13 +48,23 @@ class Semaphore {
 	}
 }
 
-export const createRunner = (cwd: string, onChange: () => void, maxConcurrency = DEFAULT_MAX_CONCURRENCY): Runner => {
+export const createRunner = (
+	cwd: string,
+	onChange: () => void,
+	maxConcurrency = DEFAULT_MAX_CONCURRENCY,
+	factory: ProcessFactory = new ChildProcessAdapter(),
+): Runner => {
 	const runs = new Map<string, AgentRun>();
-	const children = new Map<string, ChildProcess>();
-	const tempDirectories = new Set<string>();
+	const handles = new Map<string, ProcessHandle>();
 	const spawning = new Set<string>();
+	let cachedInvocation: PiInvocation | null = null;
 	let isShuttingDown = false;
 	const semaphore = new Semaphore(maxConcurrency);
+
+	const resolveInvocation = (): PiInvocation => {
+		if (!cachedInvocation) cachedInvocation = derivePiInvocation();
+		return cachedInvocation;
+	};
 
 	const updateRun = (name: string, patch: Partial<AgentRun>): void => {
 		const previous = runs.get(name) ?? createInitialRun(name);
@@ -95,26 +84,25 @@ export const createRunner = (cwd: string, onChange: () => void, maxConcurrency =
 		if (signal?.aborted) throw new Error(`spawn aborted before start for '${member.name}'`);
 
 		spawning.add(member.name);
-		let promptFile: { filePath: string; directory: string };
-		try {
-			promptFile = await writeSystemPromptFile(member.instructions);
-			tempDirectories.add(promptFile.directory);
-		} catch (error) {
-			spawning.delete(member.name);
-			throw error;
-		}
 
-		const invocation = derivePiInvocation();
-		const args = [
+		const invocation = resolveInvocation();
+		const baseArgs = [
 			...invocation.baseArgs,
 			"--mode", "json",
 			"-p",
 			"--no-session",
 			"--model", member.model,
-			"--append-system-prompt", promptFile.filePath,
-			task,
 		];
 
+		let handle: ProcessHandle;
+		try {
+			handle = await factory.start(invocation.command, baseArgs, member.instructions, cwd);
+		} catch (error) {
+			spawning.delete(member.name);
+			throw error;
+		}
+
+		handles.set(member.name, handle);
 		updateRun(member.name, {
 			state: "thinking",
 			task,
@@ -123,19 +111,11 @@ export const createRunner = (cwd: string, onChange: () => void, maxConcurrency =
 			transcript: "",
 			activity: null,
 			lastError: null,
-			pid: null,
+			pid: handle.pid ?? null,
 		});
 		spawning.delete(member.name);
 
 		return new Promise<AgentRun>((resolve) => {
-			const child = spawn(invocation.command, args, {
-				cwd,
-				shell: false,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			children.set(member.name, child);
-			updateRun(member.name, { pid: child.pid ?? null });
-
 			const accumulator = createAccumulator();
 			accumulator.state = "thinking";
 			let aborted = false;
@@ -158,7 +138,7 @@ export const createRunner = (cwd: string, onChange: () => void, maxConcurrency =
 				});
 			};
 
-			child.stdout?.on("data", (chunk: Buffer) => {
+			handle.stdout.on("data", (chunk: Buffer) => {
 				pendingLine += chunk.toString("utf-8");
 				let newlineIndex = pendingLine.indexOf("\n");
 				while (newlineIndex !== -1) {
@@ -167,11 +147,11 @@ export const createRunner = (cwd: string, onChange: () => void, maxConcurrency =
 					newlineIndex = pendingLine.indexOf("\n");
 				}
 			});
-			child.stderr?.on("data", (chunk: Buffer) => { stderrBuffer += chunk.toString("utf-8"); });
+			handle.stderr.on("data", (chunk: Buffer) => { stderrBuffer += chunk.toString("utf-8"); });
 
 			const onAbort = (): void => {
 				aborted = true;
-				killWithGrace(child);
+				handle.kill();
 			};
 			if (signal) {
 				if (signal.aborted) onAbort();
@@ -183,9 +163,7 @@ export const createRunner = (cwd: string, onChange: () => void, maxConcurrency =
 				resolved = true;
 				if (pendingLine.length > 0) consumeLine(pendingLine);
 				signal?.removeEventListener("abort", onAbort);
-				children.delete(member.name);
-				tempDirectories.delete(promptFile.directory);
-				fs.promises.rm(promptFile.directory, { recursive: true, force: true }).catch(() => {});
+				handles.delete(member.name);
 
 				const failed =
 					aborted ||
@@ -208,11 +186,11 @@ export const createRunner = (cwd: string, onChange: () => void, maxConcurrency =
 				resolve(runs.get(member.name) ?? createInitialRun(member.name, task));
 			};
 
-			child.on("error", (error) => {
+			handle.on("error", (error) => {
 				accumulator.errorMessage = error.message;
-				if (!children.has(member.name)) finalize(null);
+				if (!handles.has(member.name)) finalize(null);
 			});
-			child.on("close", finalize);
+			handle.on("close", finalize);
 		});
 	};
 
@@ -220,14 +198,10 @@ export const createRunner = (cwd: string, onChange: () => void, maxConcurrency =
 		if (isShuttingDown) return;
 		isShuttingDown = true;
 		process.removeListener("exit", shutdown);
-		for (const child of children.values()) {
-			try { if (!child.killed) child.kill("SIGKILL"); } catch { /* ignore */ }
+		for (const handle of handles.values()) {
+			handle.kill();
 		}
-		children.clear();
-		for (const directory of tempDirectories) {
-			try { fs.rmSync(directory, { recursive: true, force: true }); } catch { /* ignore */ }
-		}
-		tempDirectories.clear();
+		handles.clear();
 	};
 
 	process.on("exit", shutdown);
@@ -235,9 +209,9 @@ export const createRunner = (cwd: string, onChange: () => void, maxConcurrency =
 	return Object.freeze({
 		spawn: (member, task, signal) => semaphore.run(() => spawnAgent(member, task, signal)),
 		kill: (name) => {
-			const child = children.get(name);
-			if (!child) return false;
-			killWithGrace(child);
+			const handle = handles.get(name);
+			if (!handle) return false;
+			handle.kill();
 			return true;
 		},
 		list: () => Array.from(runs.values()),
