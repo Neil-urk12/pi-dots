@@ -1,9 +1,10 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
+import { NodeClock } from "./src/clock.ts";
+import { createWidgetFlusher, type WidgetFlusher } from "./src/flusher.ts";
 import { createRunner, type Runner } from "./src/runner.ts";
 import { loadTeam } from "./src/team.ts";
 import { registerTools } from "./src/tools.ts";
-import { LIVE_AGENT_STATES, type TeamMember } from "./src/types.ts";
-import { renderChips } from "./src/widget.ts";
+import { type TeamMember } from "./src/types.ts";
 
 const TASK_SUMMARY_MAX_CHARS = 80;
 
@@ -30,67 +31,7 @@ const STATIC_GUIDANCE =
 const buildSystemPromptAddition = (team: ReadonlyMap<string, TeamMember>): string =>
 	`# nano-team subagents\n\nRoster:\n${renderRoster(team)}\n\n${STATIC_GUIDANCE}`;
 
-const WIDGET_KEY = "nano-team";
-const FLUSH_DEBOUNCE_MS = 50;
-const ANIMATION_FRAME_MS = 300;
 const FALLBACK_TERMINAL_COLS = 80;
-
-type WidgetFlusher = Readonly<{ schedule: () => void; cancel: () => void }>;
-
-const createWidgetFlusher = (
-	ctx: ExtensionContext,
-	getRunner: () => Runner | null,
-	getTeam: () => ReadonlyMap<string, TeamMember>,
-): WidgetFlusher => {
-	let pendingTimer: NodeJS.Timeout | null = null;
-	let animationTimer: NodeJS.Timeout | null = null;
-
-	const stopAnimation = (): void => {
-		if (!animationTimer) return;
-		clearInterval(animationTimer);
-		animationTimer = null;
-	};
-
-	const flush = (): void => {
-		pendingTimer = null;
-		const runner = ctx.hasUI ? getRunner() : null;
-		if (!runner) {
-			stopAnimation();
-			return;
-		}
-		const runs = runner.list();
-		const lines = renderChips(
-			runs,
-			getTeam(),
-			process.stdout.columns ?? FALLBACK_TERMINAL_COLS,
-			ctx.ui.theme,
-			Math.floor(Date.now() / ANIMATION_FRAME_MS),
-		);
-		ctx.ui.setWidget(WIDGET_KEY, lines.length > 0 ? lines : undefined, { placement: "aboveEditor" });
-
-		const hasLiveAgent = runs.some((run) => LIVE_AGENT_STATES.has(run.state));
-		if (hasLiveAgent && !animationTimer) {
-			animationTimer = setInterval(flush, ANIMATION_FRAME_MS);
-			animationTimer.unref?.();
-		} else if (!hasLiveAgent) {
-			stopAnimation();
-		}
-	};
-
-	return {
-		schedule: () => {
-			if (pendingTimer) return;
-			pendingTimer = setTimeout(flush, FLUSH_DEBOUNCE_MS);
-		},
-		cancel: () => {
-			if (pendingTimer) {
-				clearTimeout(pendingTimer);
-				pendingTimer = null;
-			}
-			stopAnimation();
-		},
-	};
-};
 
 export default function nanoTeam(pi: ExtensionAPI): void {
 	let team: ReadonlyMap<string, TeamMember> = new Map();
@@ -105,10 +46,22 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 			ctx.ui.notify(`nano-team: ${result.errors.join("; ")}`, "warning");
 		}
 
-		flusher = createWidgetFlusher(ctx, () => runner, () => team);
+		if (ctx.hasUI) {
+			flusher = createWidgetFlusher({
+				clock: new NodeClock(),
+				sink: {
+					setWidget: (key, lines, opts) =>
+						ctx.ui.setWidget(key, lines as string[] | undefined, opts),
+				},
+				getRunner: () => runner,
+				getTeam: () => team,
+				getCols: () => process.stdout.columns ?? FALLBACK_TERMINAL_COLS,
+				theme: ctx.ui.theme,
+			});
+		}
 		runner = createRunner(ctx.cwd, () => flusher?.schedule());
 		registerTools(pi, runner, () => team);
-		flusher.schedule();
+		flusher?.schedule();
 	});
 
 	pi.on("before_agent_start", (event) => ({
