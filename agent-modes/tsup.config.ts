@@ -9,4 +9,8 @@ export default defineConfig({
   dts: true,
   outDir: "dist",
   clean: true,
+  external: [
+    "@earendil-works/pi-coding-agent",
+    "@earendil-works/pi-tui",
+  ],
 });
