@@ -74,7 +74,7 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		unsubscribe?.();
 		unsubscribe = null;
-		flusher?.cancel();
+		flusher?.dispose();
 		subagent?.shutdown();
 		subagent = null;
 		flusher = null;

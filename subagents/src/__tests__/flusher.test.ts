@@ -119,6 +119,23 @@ describe("WidgetFlusher — cancel", () => {
 	});
 });
 
+describe("WidgetFlusher — dispose", () => {
+	test("clears the widget, cancels pending timers and animation interval", () => {
+		const { clock, sink, flusher } = buildDeps();
+
+		flusher.schedule();
+		clock.advance(FLUSH_DEBOUNCE_MS);
+		expect(sink.calls).toHaveLength(1);
+
+		flusher.dispose();
+		expect(sink.calls).toHaveLength(2);
+		expect(sink.last?.lines).toBeUndefined();
+
+		clock.advance(ANIMATION_FRAME_MS * 10);
+		expect(sink.calls).toHaveLength(2);
+	});
+});
+
 describe("WidgetFlusher — empty output", () => {
 	test("writes undefined to the sink when no lines are rendered", () => {
 		const { clock, sink, flusher } = buildDeps({
