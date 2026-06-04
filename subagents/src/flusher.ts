@@ -28,6 +28,7 @@ export type WidgetFlusher = Readonly<{
 	schedule(): void;
 	cancel(): void;
 	tick(now: number): void;
+	dispose(): void;
 }>;
 
 export type WidgetFlusherDeps = Readonly<{
@@ -96,5 +97,13 @@ export const createWidgetFlusher = (deps: WidgetFlusherDeps): WidgetFlusher => {
 			disarmAnimation();
 		},
 		tick: (now: number) => tick(now),
+		dispose: () => {
+			if (pendingTimer) {
+				pendingTimer.cancel();
+				pendingTimer = null;
+			}
+			disarmAnimation();
+			deps.sink.setWidget(WIDGET_KEY, undefined, { placement: WIDGET_PLACEMENT });
+		},
 	};
 };

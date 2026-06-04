@@ -230,12 +230,19 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 	const shutdown = (): void => {
 		if (isShuttingDown) return;
 		isShuttingDown = true;
+		process.off("exit", onProcessExit);
 		for (const handle of handles.values()) {
 			handle.kill();
 		}
 		handles.clear();
 		listeners.clear();
 	};
+
+	const onProcessExit = (): void => {
+		shutdown();
+	};
+
+	process.on("exit", onProcessExit);
 
 	return Object.freeze({
 		spawn: (member, task, signal) => semaphore.run(() => spawnAgent(member, task, signal)),
