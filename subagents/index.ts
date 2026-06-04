@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionContext } from "@mariozechner/pi-coding-agent";
 import { NodeClock } from "./src/clock.ts";
 import { createWidgetFlusher, type WidgetFlusher } from "./src/flusher.ts";
-import { createRunner, type Runner } from "./src/runner.ts";
+import { createSubagent, type Subagent } from "./src/subagent.ts";
 import { loadTeam } from "./src/team.ts";
 import { registerTools } from "./src/tools.ts";
 import { type TeamMember } from "./src/types.ts";
@@ -35,8 +35,9 @@ const FALLBACK_TERMINAL_COLS = 80;
 
 export default function nanoTeam(pi: ExtensionAPI): void {
 	let team: ReadonlyMap<string, TeamMember> = new Map();
-	let runner: Runner | null = null;
+	let subagent: Subagent | null = null;
 	let flusher: WidgetFlusher | null = null;
+	let unsubscribe: (() => void) | null = null;
 
 	pi.on("session_start", async (_event, ctx) => {
 		const result = await loadTeam(ctx.cwd);
@@ -46,6 +47,8 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 			ctx.ui.notify(`nano-team: ${result.errors.join("; ")}`, "warning");
 		}
 
+		subagent = createSubagent(ctx.cwd);
+
 		if (ctx.hasUI) {
 			flusher = createWidgetFlusher({
 				clock: new NodeClock(),
@@ -53,14 +56,14 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 					setWidget: (key, lines, opts) =>
 						ctx.ui.setWidget(key, lines as string[] | undefined, opts),
 				},
-				getRunner: () => runner,
+				getRunner: () => subagent,
 				getTeam: () => team,
 				getCols: () => process.stdout.columns ?? FALLBACK_TERMINAL_COLS,
 				theme: ctx.ui.theme,
 			});
+			unsubscribe = subagent.subscribe(() => flusher?.schedule());
 		}
-		runner = createRunner(ctx.cwd, () => flusher?.schedule());
-		registerTools(pi, runner, () => team);
+		registerTools(pi, subagent, () => team);
 		flusher?.schedule();
 	});
 
@@ -69,9 +72,11 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 	}));
 
 	pi.on("session_shutdown", () => {
+		unsubscribe?.();
+		unsubscribe = null;
 		flusher?.cancel();
-		runner?.shutdown();
-		runner = null;
+		subagent?.shutdown();
+		subagent = null;
 		flusher = null;
 	});
 }

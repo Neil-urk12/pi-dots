@@ -1,6 +1,6 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type, type Static } from "typebox";
-import type { Runner } from "./runner.ts";
+import type { Subagent } from "./subagent.ts";
 import {
 	type AgentRun,
 	createInitialRun,
@@ -103,7 +103,7 @@ type StatusDetails = Readonly<{
 
 export const registerTools = (
 	pi: ExtensionAPI,
-	runner: Runner,
+	subagent: Subagent,
 	getTeam: () => ReadonlyMap<string, TeamMember>,
 ): void => {
 	pi.registerTool({
@@ -124,7 +124,7 @@ export const registerTools = (
 			if (!task) {
 				throw new Error(`no task supplied for '${params.name}' and YAML 'task' is empty`);
 			}
-			const run = await runner.spawn(member, task, signal);
+			const run = await subagent.spawn(member, task, signal);
 			if (run.state === "error") {
 				throw new Error(run.lastError || run.transcript || `agent '${params.name}' failed`);
 			}
@@ -139,7 +139,7 @@ export const registerTools = (
 		promptSnippet: "`nano_agent_kill(name)` — abort a stuck or no-longer-needed nano-team agent.",
 		parameters: KillParams,
 		async execute(_toolCallId, params: KillArgs) {
-			if (!runner.kill(params.name)) {
+			if (!subagent.kill(params.name)) {
 				throw new Error(`agent '${params.name}' is not running`);
 			}
 			return { content: [asTextContent(`killed '${params.name}'`)], details: { name: params.name } };
@@ -157,10 +157,10 @@ export const registerTools = (
 		async execute(_toolCallId, params: StatusArgs) {
 			const team = getTeam();
 			const teamArray = [...team.values()];
-			const allRuns = runner.list();
+			const allRuns = subagent.list();
 			if (params.name) {
 				const member = team.get(params.name);
-				const existingRun = runner.get(params.name);
+				const existingRun = subagent.get(params.name);
 				if (!member && !existingRun) {
 					throw new Error(`unknown agent '${params.name}'. available: ${formatAvailableAgents(team)}`);
 				}

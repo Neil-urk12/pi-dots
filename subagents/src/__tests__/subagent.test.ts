@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PassThrough } from "node:stream";
-import { createRunner } from "../runner.ts";
+import { createSubagent } from "../subagent.ts";
 import type { ProcessFactory, ProcessHandle } from "../process.ts";
 import type { TeamMember } from "../types.ts";
 
@@ -91,12 +91,12 @@ const yieldToRunner = (): Promise<void> => new Promise((r) => setTimeout(r, 1));
 
 // ── Tests ────────────────────────────────────────────────────────────
 
-describe("Runner lifecycle", () => {
+describe("Subagent lifecycle", () => {
 	test("transitions through thinking → working → done on normal completion", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member(), "test task", undefined);
+		const promise = subagent.spawn(member(), "test task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
 
@@ -129,9 +129,9 @@ describe("Runner lifecycle", () => {
 
 	test("captures non-zero exit as error", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member(), "test task", undefined);
+		const promise = subagent.spawn(member(), "test task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
 
@@ -145,9 +145,9 @@ describe("Runner lifecycle", () => {
 
 	test("captures error event message", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member(), "test task", undefined);
+		const promise = subagent.spawn(member(), "test task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
 
@@ -161,10 +161,10 @@ describe("Runner lifecycle", () => {
 
 	test("handles abort signal gracefully", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 		const controller = new AbortController();
 
-		const promise = runner.spawn(member(), "test task", controller.signal);
+		const promise = subagent.spawn(member(), "test task", controller.signal);
 		await yieldToRunner();
 		const handle = handles[0]!;
 
@@ -180,13 +180,13 @@ describe("Runner lifecycle", () => {
 
 	test("rejects concurrent spawn of same agent", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 		const m = member();
 
-		const first = runner.spawn(m, "task 1", undefined);
+		const first = subagent.spawn(m, "task 1", undefined);
 		await yieldToRunner();
 
-		await expect(runner.spawn(m, "task 2", undefined)).rejects.toThrow("already running");
+		await expect(subagent.spawn(m, "task 2", undefined)).rejects.toThrow("already running");
 
 		handles[0]!.emitClose(0);
 		await first;
@@ -194,13 +194,13 @@ describe("Runner lifecycle", () => {
 
 	test("kill returns true when agent is running", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member(), "test task", undefined);
+		const promise = subagent.spawn(member(), "test task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
 
-		expect(runner.kill("test-agent")).toBe(true);
+		expect(subagent.kill("test-agent")).toBe(true);
 		expect(handle.killed).toBe(true);
 
 		handle.emitClose(null);
@@ -209,20 +209,20 @@ describe("Runner lifecycle", () => {
 
 	test("kill returns false when agent is not running", () => {
 		const { factory } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		expect(runner.kill("nonexistent")).toBe(false);
+		expect(subagent.kill("nonexistent")).toBe(false);
 	});
 
 	test("list returns all runs", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const p1 = runner.spawn(member("agent-1"), "task 1", undefined);
-		const p2 = runner.spawn(member("agent-2"), "task 2", undefined);
+		const p1 = subagent.spawn(member("agent-1"), "task 1", undefined);
+		const p2 = subagent.spawn(member("agent-2"), "task 2", undefined);
 		await yieldToRunner();
 
-		expect(runner.list()).toHaveLength(2);
+		expect(subagent.list()).toHaveLength(2);
 
 		handles[0]!.emitClose(0);
 		handles[1]!.emitClose(0);
@@ -231,12 +231,12 @@ describe("Runner lifecycle", () => {
 
 	test("get returns specific run", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member("agent-1"), "task 1", undefined);
+		const promise = subagent.spawn(member("agent-1"), "task 1", undefined);
 		await yieldToRunner();
 
-		const run = runner.get("agent-1");
+		const run = subagent.get("agent-1");
 		expect(run).toBeDefined();
 		expect(run!.name).toBe("agent-1");
 		expect(run!.state).toBe("thinking");
@@ -247,9 +247,9 @@ describe("Runner lifecycle", () => {
 
 	test("passes instructions and args to factory", async () => {
 		const { factory, handles, calls } = createFakeFactory();
-		const runner = createRunner("/test/cwd", () => {}, 4, factory);
+		const subagent = createSubagent("/test/cwd", { factory });
 
-		const promise = runner.spawn(member("agent-1", "default task"), "override task", undefined);
+		const promise = subagent.spawn(member("agent-1", "default task"), "override task", undefined);
 		await yieldToRunner();
 
 		expect(calls).toHaveLength(1);
@@ -262,15 +262,16 @@ describe("Runner lifecycle", () => {
 		await promise;
 	});
 
-	test("calls onChange when run state updates", async () => {
+	test("subscribe listeners fire on state updates", async () => {
 		const { factory, handles } = createFakeFactory();
-		let changeCount = 0;
-		const runner = createRunner("/test", () => { changeCount++; }, 4, factory);
+		let notifyCount = 0;
+		const subagent = createSubagent("/test", { factory });
+		subagent.subscribe(() => { notifyCount++; });
 
-		const promise = runner.spawn(member(), "task", undefined);
+		const promise = subagent.spawn(member(), "task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
-		const initialChanges = changeCount;
+		const initialNotifies = notifyCount;
 
 		handle.emitStdout(
 			jsonLine({
@@ -279,7 +280,7 @@ describe("Runner lifecycle", () => {
 				args: { path: "/test" },
 			}),
 		);
-		expect(changeCount).toBeGreaterThan(initialChanges);
+		expect(notifyCount).toBeGreaterThan(initialNotifies);
 
 		handle.emitClose(0);
 		await promise;
@@ -287,13 +288,13 @@ describe("Runner lifecycle", () => {
 
 	test("shutdown kills all running agents", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const p1 = runner.spawn(member("a1"), "t1", undefined);
-		const p2 = runner.spawn(member("a2"), "t2", undefined);
+		const p1 = subagent.spawn(member("a1"), "t1", undefined);
+		const p2 = subagent.spawn(member("a2"), "t2", undefined);
 		await yieldToRunner();
 
-		runner.shutdown();
+		subagent.shutdown();
 
 		expect(handles[0]!.killed).toBe(true);
 		expect(handles[1]!.killed).toBe(true);
@@ -304,14 +305,14 @@ describe("Runner lifecycle", () => {
 	});
 });
 
-describe("Runner concurrency", () => {
+describe("Subagent concurrency", () => {
 	test("semaphore limits concurrent spawns", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 2, factory);
+		const subagent = createSubagent("/test", { factory, maxConcurrency: 2 });
 
-		const p1 = runner.spawn(member("a1"), "t1", undefined);
-		const p2 = runner.spawn(member("a2"), "t2", undefined);
-		const p3 = runner.spawn(member("a3"), "t3", undefined);
+		const p1 = subagent.spawn(member("a1"), "t1", undefined);
+		const p2 = subagent.spawn(member("a2"), "t2", undefined);
+		const p3 = subagent.spawn(member("a3"), "t3", undefined);
 
 		await new Promise((r) => setTimeout(r, 10));
 		expect(handles).toHaveLength(2);
@@ -328,12 +329,12 @@ describe("Runner concurrency", () => {
 	});
 });
 
-describe("Runner stream parsing integration", () => {
+describe("Subagent stream parsing integration", () => {
 	test("accumulates transcript across multiple message_end events", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member(), "task", undefined);
+		const promise = subagent.spawn(member(), "task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
 
@@ -366,9 +367,9 @@ describe("Runner stream parsing integration", () => {
 
 	test("captures errorMessage from stream as error state", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member(), "task", undefined);
+		const promise = subagent.spawn(member(), "task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
 
@@ -392,9 +393,9 @@ describe("Runner stream parsing integration", () => {
 
 	test("ignores malformed JSON lines without crashing", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member(), "task", undefined);
+		const promise = subagent.spawn(member(), "task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
 
@@ -420,9 +421,9 @@ describe("Runner stream parsing integration", () => {
 
 	test("handles partial lines buffered across chunks", async () => {
 		const { factory, handles } = createFakeFactory();
-		const runner = createRunner("/test", () => {}, 4, factory);
+		const subagent = createSubagent("/test", { factory });
 
-		const promise = runner.spawn(member(), "task", undefined);
+		const promise = subagent.spawn(member(), "task", undefined);
 		await yieldToRunner();
 		const handle = handles[0]!;
 

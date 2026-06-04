@@ -4,15 +4,24 @@ import { type AgentRun, createInitialRun, LIVE_AGENT_STATES, type TeamMember } f
 import { type StreamEvent, applyStreamEvent, createAccumulator } from "./stream-parser.ts";
 import { type ProcessFactory, type ProcessHandle, ChildProcessAdapter } from "./process.ts";
 
-export type Runner = Readonly<{
+export type Subagent = Readonly<{
 	spawn(member: TeamMember, task: string, signal: AbortSignal | undefined): Promise<AgentRun>;
 	kill(name: string): boolean;
 	list(): readonly AgentRun[];
 	get(name: string): AgentRun | undefined;
+	subscribe(listener: () => void): () => void;
 	shutdown(): void;
 }>;
 
 type PiInvocation = { command: string; baseArgs: readonly string[] };
+
+export type SubagentOptions = Readonly<{
+	factory?: ProcessFactory;
+	now?: () => number;
+	maxConcurrency?: number;
+	/** @internal test seam — bypasses process.argv inspection */
+	resolveInvocation?: () => PiInvocation;
+}>;
 
 const derivePiInvocation = (): PiInvocation => {
 	const currentScript = process.argv[1];
@@ -48,28 +57,32 @@ class Semaphore {
 	}
 }
 
-export const createRunner = (
-	cwd: string,
-	onChange: () => void,
-	maxConcurrency = DEFAULT_MAX_CONCURRENCY,
-	factory: ProcessFactory = new ChildProcessAdapter(),
-): Runner => {
+export const createSubagent = (cwd: string, options: SubagentOptions = {}): Subagent => {
+	const factory: ProcessFactory = options.factory ?? new ChildProcessAdapter();
+	const now: () => number = options.now ?? (() => Date.now());
+	const maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
+	const resolveInvocation: () => PiInvocation = options.resolveInvocation ?? derivePiInvocation;
+
 	const runs = new Map<string, AgentRun>();
 	const handles = new Map<string, ProcessHandle>();
-	const spawning = new Set<string>();
+	const listeners = new Set<() => void>();
 	let cachedInvocation: PiInvocation | null = null;
 	let isShuttingDown = false;
 	const semaphore = new Semaphore(maxConcurrency);
 
-	const resolveInvocation = (): PiInvocation => {
-		if (!cachedInvocation) cachedInvocation = derivePiInvocation();
+	const getInvocation = (): PiInvocation => {
+		if (!cachedInvocation) cachedInvocation = resolveInvocation();
 		return cachedInvocation;
+	};
+
+	const notify = (): void => {
+		for (const listener of listeners) listener();
 	};
 
 	const updateRun = (name: string, patch: Partial<AgentRun>): void => {
 		const previous = runs.get(name) ?? createInitialRun(name);
 		runs.set(name, { ...previous, ...patch });
-		onChange();
+		notify();
 	};
 
 	const spawnAgent = async (
@@ -77,15 +90,29 @@ export const createRunner = (
 		task: string,
 		signal: AbortSignal | undefined,
 	): Promise<AgentRun> => {
+		if (isShuttingDown) throw new Error(`subagent is shut down`);
+
 		const existingRun = runs.get(member.name);
-		if (spawning.has(member.name) || (existingRun && LIVE_AGENT_STATES.has(existingRun.state))) {
-			throw new Error(`agent '${member.name}' is already running (state=${existingRun?.state ?? "spawning"})`);
+		if (existingRun && LIVE_AGENT_STATES.has(existingRun.state)) {
+			throw new Error(`agent '${member.name}' is already running (state=${existingRun.state})`);
 		}
 		if (signal?.aborted) throw new Error(`spawn aborted before start for '${member.name}'`);
 
-		spawning.add(member.name);
+		// Transition to "thinking" synchronously so a concurrent spawn sees us as live
+		// before any async work. If factory.start() fails below, we transition to "error"
+		// with the failure message — the run store remains the single source of truth.
+		updateRun(member.name, {
+			state: "thinking",
+			task,
+			startedAt: now(),
+			endedAt: null,
+			transcript: "",
+			activity: null,
+			lastError: null,
+			pid: null,
+		});
 
-		const invocation = resolveInvocation();
+		const invocation = getInvocation();
 		const baseArgs = [
 			...invocation.baseArgs,
 			"--mode", "json",
@@ -98,22 +125,16 @@ export const createRunner = (
 		try {
 			handle = await factory.start(invocation.command, baseArgs, member.instructions, cwd);
 		} catch (error) {
-			spawning.delete(member.name);
+			updateRun(member.name, {
+				state: "error",
+				endedAt: now(),
+				lastError: (error as Error).message,
+			});
 			throw error;
 		}
 
 		handles.set(member.name, handle);
-		updateRun(member.name, {
-			state: "thinking",
-			task,
-			startedAt: Date.now(),
-			endedAt: null,
-			transcript: "",
-			activity: null,
-			lastError: null,
-			pid: handle.pid ?? null,
-		});
-		spawning.delete(member.name);
+		updateRun(member.name, { pid: handle.pid ?? null });
 
 		return new Promise<AgentRun>((resolve) => {
 			const accumulator = createAccumulator();
@@ -173,7 +194,13 @@ export const createRunner = (
 					accumulator.errorMessage !== undefined;
 
 				if (!failed) {
-					updateRun(member.name, { state: "done", endedAt: Date.now(), activity: null, lastError: null, pid: null });
+					updateRun(member.name, {
+						state: "done",
+						endedAt: now(),
+						activity: null,
+						lastError: null,
+						pid: null,
+					});
 				} else {
 					const trimmedStderr = stderrBuffer.trim();
 					const lastError =
@@ -181,7 +208,13 @@ export const createRunner = (
 						(trimmedStderr.length > 0 ? trimmedStderr : null) ??
 						(aborted ? "aborted" : null) ??
 						`pi exited with code ${exitCode ?? "unknown"}`;
-					updateRun(member.name, { state: "error", endedAt: Date.now(), activity: null, lastError, pid: null });
+					updateRun(member.name, {
+						state: "error",
+						endedAt: now(),
+						activity: null,
+						lastError,
+						pid: null,
+					});
 				}
 				resolve(runs.get(member.name) ?? createInitialRun(member.name, task));
 			};
@@ -197,14 +230,12 @@ export const createRunner = (
 	const shutdown = (): void => {
 		if (isShuttingDown) return;
 		isShuttingDown = true;
-		process.removeListener("exit", shutdown);
 		for (const handle of handles.values()) {
 			handle.kill();
 		}
 		handles.clear();
+		listeners.clear();
 	};
-
-	process.on("exit", shutdown);
 
 	return Object.freeze({
 		spawn: (member, task, signal) => semaphore.run(() => spawnAgent(member, task, signal)),
@@ -216,6 +247,10 @@ export const createRunner = (
 		},
 		list: () => Array.from(runs.values()),
 		get: (name) => runs.get(name),
+		subscribe: (listener) => {
+			listeners.add(listener);
+			return () => { listeners.delete(listener); };
+		},
 		shutdown,
 	});
 };
