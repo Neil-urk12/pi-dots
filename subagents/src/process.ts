@@ -10,6 +10,8 @@ export type ProcessHandle = Readonly<{
 	pid: number | undefined;
 	on(event: "close", listener: (code: number | null) => void): void;
 	on(event: "error", listener: (error: Error) => void): void;
+	off?(event: "close", listener: (code: number | null) => void): void;
+	off?(event: "error", listener: (error: Error) => void): void;
 	kill(): void;
 }>;
 
@@ -62,6 +64,10 @@ export class ChildProcessAdapter implements ProcessFactory {
 			on(event: "close" | "error", listener: ((code: number | null) => void) | ((error: Error) => void)) {
 				if (event === "close") attachCloseListener(child, listener as (code: number | null) => void);
 				else attachErrorListener(child, listener as (error: Error) => void);
+			},
+			off(event: "close" | "error", listener: ((code: number | null) => void) | ((error: Error) => void)) {
+				if (event === "close") child.off("close", listener as (code: number | null) => void);
+				else child.off("error", listener as (error: Error) => void);
 			},
 			kill: () => {
 				if (child.killed) return;

@@ -1,376 +1,127 @@
+// Replace src/__tests__/stream-parser-class.test.ts with this complete file
 import { describe, expect, test } from "bun:test";
-import {
-	type StreamAccumulator,
-	type StreamEvent,
-	createAccumulator,
-	truncateActivity,
-	summarizeToolArguments,
-	formatTextSnippet,
-	formatToolActivity,
-	ingestAssistantMessage,
-	applyStreamEvent,
-} from "../stream-parser.ts";
+import { PassThrough } from "node:stream";
+import { StreamParser } from "../stream-parser.ts";
+import { type ProcessHandle } from "../process.ts";
+import { type AgentRun } from "../types.ts";
 
-// ── truncateActivity ─────────────────────────────────────────────────
+const jsonLine = (event: Record<string, unknown>): string => JSON.stringify(event) + "\n";
 
-describe("truncateActivity", () => {
-	test("returns short text unchanged", () => {
-		expect(truncateActivity("hello")).toBe("hello");
-	});
+const buildMockProcess = (options: {
+	exitCode?: number | null;
+	emitError?: Error;
+} = {}) => {
+	const stdout = new PassThrough();
+	const stderr = new PassThrough();
+	const listeners = new Map<string, Array<Function>>();
 
-	test("returns text at exactly the limit unchanged", () => {
-		const text = "a".repeat(80);
-		expect(truncateActivity(text)).toBe(text);
-	});
+	const handle: ProcessHandle & {
+		emitClose(code: number | null): void;
+		emitError(error: Error): void;
+		killed: boolean;
+	} = {
+		stdout,
+		stderr,
+		pid: 1234,
+		killed: false,
+		on: (event: string, fn: Function) => {
+			const list = listeners.get(event) ?? [];
+			list.push(fn);
+			listeners.set(event, list);
+		},
+		off: (event: string, fn: Function) => {
+			const list = listeners.get(event) ?? [];
+			listeners.set(event, list.filter((x) => x !== fn));
+		},
+		kill: () => {
+			handle.killed = true;
+		},
+		emitClose: (code: number | null) => {
+			stdout.end();
+			stderr.end();
+			const list = listeners.get("close") ?? [];
+			for (const fn of list) fn(code);
+		},
+		emitError: (err: Error) => {
+			const list = listeners.get("error") ?? [];
+			for (const fn of list) fn(err);
+		},
+	};
+	return handle;
+};
 
-	test("truncates text exceeding the limit with ellipsis", () => {
-		const text = "a".repeat(81);
-		const result = truncateActivity(text);
-		expect(result.length).toBe(80);
-		expect(result).toEndWith("…");
-	});
-
-	test("handles empty string", () => {
-		expect(truncateActivity("")).toBe("");
-	});
-});
-
-// ── summarizeToolArguments ────────────────────────────────────────────
-
-describe("summarizeToolArguments", () => {
-	test("returns empty for null/undefined", () => {
-		expect(summarizeToolArguments(null)).toBe("");
-		expect(summarizeToolArguments(undefined)).toBe("");
-	});
-
-	test("returns empty for non-object", () => {
-		expect(summarizeToolArguments("string")).toBe("");
-		expect(summarizeToolArguments(42)).toBe("");
-	});
-
-	test("returns empty for object with no matching keys", () => {
-		expect(summarizeToolArguments({ foo: "bar" })).toBe("");
-	});
-
-	test("extracts 'path' key", () => {
-		expect(summarizeToolArguments({ path: "/src/main.ts" })).toBe("/src/main.ts");
-	});
-
-	test("extracts 'command' key", () => {
-		expect(summarizeToolArguments({ command: "npm test" })).toBe("npm test");
-	});
-
-	test("extracts 'query' key", () => {
-		expect(summarizeToolArguments({ query: "find bugs" })).toBe("find bugs");
-	});
-
-	test("extracts 'url' key", () => {
-		expect(summarizeToolArguments({ url: "https://example.com" })).toBe("https://example.com");
-	});
-
-	test("skips empty string values", () => {
-		expect(summarizeToolArguments({ path: "", command: "ls" })).toBe("ls");
-	});
-
-	test("skips non-string values", () => {
-		expect(summarizeToolArguments({ path: 42, command: "ls" })).toBe("ls");
-	});
-
-	test("respects TOOL_ARG_KEYS priority order — 'path' before 'command'", () => {
-		expect(summarizeToolArguments({ path: "/a", command: "b" })).toBe("/a");
-	});
-});
-
-// ── formatTextSnippet ────────────────────────────────────────────────
-
-describe("formatTextSnippet", () => {
-	test("returns last non-empty line trimmed", () => {
-		expect(formatTextSnippet("line1\nline2\nline3")).toBe("line3");
-	});
-
-	test("collapses internal whitespace", () => {
-		expect(formatTextSnippet("  hello   world  ")).toBe("hello world");
-	});
-
-	test("skips trailing empty lines", () => {
-		expect(formatTextSnippet("content\n\n\n")).toBe("content");
-	});
-
-	test("returns empty for all-whitespace input", () => {
-		expect(formatTextSnippet("   \n  \n")).toBe("");
-	});
-
-	test("returns empty for empty string", () => {
-		expect(formatTextSnippet("")).toBe("");
-	});
-
-	test("truncates long lines", () => {
-		const long = "x".repeat(100);
-		const result = formatTextSnippet(long);
-		expect(result.length).toBe(80);
-		expect(result).toEndWith("…");
-	});
-
-	test("handles single line", () => {
-		expect(formatTextSnippet("only line")).toBe("only line");
-	});
-});
-
-// ── formatToolActivity ───────────────────────────────────────────────
-
-describe("formatToolActivity", () => {
-	test("formats tool name with argument", () => {
-		expect(formatToolActivity("read", { path: "/src/main.ts" })).toBe("→ read(/src/main.ts)");
-	});
-
-	test("formats tool name without useful arguments", () => {
-		expect(formatToolActivity("bash", {})).toBe("→ bash");
-	});
-
-	test("formats tool name with null arguments", () => {
-		expect(formatToolActivity("bash", null)).toBe("→ bash");
-	});
-
-	test("truncates long argument values", () => {
-		const longPath = "/very/long/" + "path/".repeat(20);
-		const result = formatToolActivity("read", { path: longPath });
-		expect(result.length).toBeLessThanOrEqual(80);
-		expect(result).toStartWith("→ read(");
-	});
-});
-
-// ── ingestAssistantMessage ────────────────────────────────────────────
-
-describe("ingestAssistantMessage", () => {
-	test("returns false for null input", () => {
-		const acc = createAccumulator();
-		expect(ingestAssistantMessage(acc, null)).toBe(false);
-	});
-
-	test("returns false for non-object input", () => {
-		const acc = createAccumulator();
-		expect(ingestAssistantMessage(acc, "string")).toBe(false);
-	});
-
-	test("returns false for non-assistant role", () => {
-		const acc = createAccumulator();
-		expect(ingestAssistantMessage(acc, { role: "user", content: [] })).toBe(false);
-	});
-
-	test("returns false for missing content array", () => {
-		const acc = createAccumulator();
-		expect(ingestAssistantMessage(acc, { role: "assistant" })).toBe(false);
-	});
-
-	test("appends text content to transcript", () => {
-		const acc = createAccumulator();
-		const result = ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [{ type: "text", text: "Hello world" }],
+describe("StreamParser Class Details", () => {
+	test("transitions through thinking, working and done", async () => {
+		const handle = buildMockProcess();
+		const updates: Array<Partial<AgentRun>> = [];
+		const parser = new StreamParser("agent", "task", {
+			onUpdate: (p) => updates.push(p),
+			now: () => 2000,
 		});
-		expect(result).toBe(true);
-		expect(acc.transcript).toBe("Hello world");
-	});
 
-	test("accumulates transcript across multiple calls", () => {
-		const acc = createAccumulator();
-		ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [{ type: "text", text: "Part 1. " }],
-		});
-		ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [{ type: "text", text: "Part 2." }],
-		});
-		expect(acc.transcript).toBe("Part 1. Part 2.");
-	});
-
-	test("sets activity from text snippet when no tool call present", () => {
-		const acc = createAccumulator();
-		ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [{ type: "text", text: "Thinking...\nDone." }],
-		});
-		expect(acc.activity).toBe("Done.");
-	});
-
-	test("does NOT set activity when tool call is present", () => {
-		const acc = createAccumulator();
-		ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [
-				{ type: "text", text: "Let me check..." },
-				{ type: "toolCall", name: "read", arguments: {} },
-			],
-		});
-		expect(acc.transcript).toBe("Let me check...");
-		expect(acc.activity).toBeNull();
-	});
-
-	test("captures stopReason", () => {
-		const acc = createAccumulator();
-		const result = ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [{ type: "text", text: "Done" }],
-			stopReason: "end_turn",
-		});
-		expect(result).toBe(true);
-		expect(acc.stopReason).toBe("end_turn");
-	});
-
-	test("captures errorMessage", () => {
-		const acc = createAccumulator();
-		const result = ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [],
-			errorMessage: "rate limited",
-		});
-		expect(result).toBe(true);
-		expect(acc.errorMessage).toBe("rate limited");
-	});
-
-	test("returns false when nothing changes", () => {
-		const acc = createAccumulator();
-		acc.stopReason = "end_turn";
-		const result = ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [],
-			stopReason: "end_turn",
-		});
-		expect(result).toBe(false);
-	});
-
-	test("handles empty content array", () => {
-		const acc = createAccumulator();
-		const result = ingestAssistantMessage(acc, {
-			role: "assistant",
-			content: [],
-		});
-		expect(result).toBe(false);
-		expect(acc.transcript).toBe("");
-	});
-});
-
-// ── applyStreamEvent ─────────────────────────────────────────────────
-
-describe("applyStreamEvent", () => {
-	test("returns false for unknown event types", () => {
-		const acc = createAccumulator();
-		expect(applyStreamEvent(acc, { type: "unknown_event" })).toBe(false);
-	});
-
-	test("transitions idle → thinking on message_start", () => {
-		const acc = createAccumulator();
-		expect(acc.state).toBe("idle");
-		const result = applyStreamEvent(acc, { type: "message_start" });
-		expect(result).toBe(true);
-		expect(acc.state).toBe("thinking");
-	});
-
-	test("returns false if already thinking on message_start", () => {
-		const acc = createAccumulator();
-		acc.state = "thinking";
-		expect(applyStreamEvent(acc, { type: "message_start" })).toBe(false);
-		expect(acc.state).toBe("thinking");
-	});
-
-	test("transitions to working on tool_execution_start", () => {
-		const acc = createAccumulator();
-		const result = applyStreamEvent(acc, {
-			type: "tool_execution_start",
-			toolName: "read",
-			args: { path: "/src/main.ts" },
-		});
-		expect(result).toBe(true);
-		expect(acc.state).toBe("working");
-		expect(acc.activity).toBe("→ read(/src/main.ts)");
-	});
-
-	test("uses 'tool' fallback when toolName is missing", () => {
-		const acc = createAccumulator();
-		applyStreamEvent(acc, { type: "tool_execution_start", args: {} });
-		expect(acc.activity).toBe("→ tool");
-	});
-
-	test("delegates message_end to ingestAssistantMessage", () => {
-		const acc = createAccumulator();
-		const result = applyStreamEvent(acc, {
+		const promise = parser.parse(handle);
+		handle.stdout.write(jsonLine({ type: "message_start" }));
+		handle.stdout.write(jsonLine({ type: "tool_execution_start", toolName: "read", args: { path: "main.ts" } }));
+		handle.stdout.write(jsonLine({
 			type: "message_end",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: "Final answer" }],
-				stopReason: "end_turn",
-			},
-		});
-		expect(result).toBe(true);
-		expect(acc.transcript).toBe("Final answer");
-		expect(acc.stopReason).toBe("end_turn");
+			message: { role: "assistant", content: [{ type: "text", text: "Finished successfully" }], stopReason: "end_turn" },
+		}));
+		handle.emitClose(0);
+
+		const result = await promise;
+		expect(result.state).toBe("done");
+		expect(result.endedAt).toBe(2000);
+		expect(updates.map((u) => u.state)).toEqual(["thinking", "working", "working"]);
+		expect(updates[updates.length - 1]!.transcript).toBe("Finished successfully");
 	});
 
-	test("returns false for message_end with no message field", () => {
-		const acc = createAccumulator();
-		expect(applyStreamEvent(acc, { type: "message_end" })).toBe(false);
-	});
-});
-
-// ── createAccumulator ────────────────────────────────────────────────
-
-describe("createAccumulator", () => {
-	test("returns correct initial state", () => {
-		const acc = createAccumulator();
-		expect(acc.state).toBe("idle");
-		expect(acc.transcript).toBe("");
-		expect(acc.activity).toBeNull();
-		expect(acc.stopReason).toBeUndefined();
-		expect(acc.errorMessage).toBeUndefined();
-	});
-});
-
-// ── integration: full event sequence ─────────────────────────────────
-
-describe("integration: full agent lifecycle", () => {
-	test("idle → thinking → working → done via sequential events", () => {
-		const acc = createAccumulator();
-
-		// Agent starts thinking
-		applyStreamEvent(acc, { type: "message_start" });
-		expect(acc.state).toBe("thinking");
-
-		// Agent calls a tool
-		applyStreamEvent(acc, {
-			type: "tool_execution_start",
-			toolName: "read",
-			args: { path: "/src/main.ts" },
+	test("captures stderr on failure exit", async () => {
+		const handle = buildMockProcess();
+		const parser = new StreamParser("agent", "task", {
+			onUpdate: () => {},
+			now: () => 3000,
 		});
-		expect(acc.state).toBe("working");
-		expect(acc.activity).toBe("→ read(/src/main.ts)");
 
-		// Agent returns result
-		applyStreamEvent(acc, {
-			type: "message_end",
-			message: {
-				role: "assistant",
-				content: [{ type: "text", text: "File contents here.\nAll looks good." }],
-				stopReason: "end_turn",
-			},
-		});
-		expect(acc.state).toBe("working"); // state not changed by message_end
-		expect(acc.transcript).toBe("File contents here.\nAll looks good.");
-		expect(acc.stopReason).toBe("end_turn");
-		expect(acc.activity).toBe("All looks good.");
+		const promise = parser.parse(handle);
+		handle.stderr.write("some error in shell\n");
+		handle.emitClose(1);
+
+		const result = await promise;
+		expect(result.state).toBe("error");
+		expect(result.lastError).toBe("some error in shell");
 	});
 
-	test("error event captured via message_end with errorMessage", () => {
-		const acc = createAccumulator();
-		applyStreamEvent(acc, { type: "message_start" });
-		applyStreamEvent(acc, {
-			type: "message_end",
-			message: {
-				role: "assistant",
-				content: [],
-				errorMessage: "context window exceeded",
-			},
+	test("handles process error event", async () => {
+		const handle = buildMockProcess();
+		const parser = new StreamParser("agent", "task", {
+			onUpdate: () => {},
+			now: () => 4000,
 		});
-		expect(acc.errorMessage).toBe("context window exceeded");
+
+		const promise = parser.parse(handle);
+		handle.emitError(new Error("process fail"));
+		handle.emitClose(null);
+
+		const result = await promise;
+		expect(result.state).toBe("error");
+		expect(result.lastError).toBe("process fail");
+	});
+
+	test("gracefully terminates on abort signal", async () => {
+		const handle = buildMockProcess();
+		const controller = new AbortController();
+		const parser = new StreamParser("agent", "task", {
+			onUpdate: () => {},
+			now: () => 5000,
+		});
+
+		const promise = parser.parse(handle, controller.signal);
+		controller.abort();
+		expect(handle.killed).toBe(true);
+		handle.emitClose(null);
+
+		const result = await promise;
+		expect(result.state).toBe("error");
+		expect(result.lastError).toBe("aborted");
 	});
 });

@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { type AgentRun, createInitialRun, LIVE_AGENT_STATES, type TeamMember } from "./types.ts";
-import { type StreamEvent, applyStreamEvent, createAccumulator } from "./stream-parser.ts";
+import { StreamParser } from "./stream-parser.ts";
 import { type ProcessFactory, type ProcessHandle, ChildProcessAdapter } from "./process.ts";
 
 export type Subagent = Readonly<{
@@ -136,95 +136,21 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 		handles.set(member.name, handle);
 		updateRun(member.name, { pid: handle.pid ?? null });
 
-		return new Promise<AgentRun>((resolve) => {
-			const accumulator = createAccumulator();
-			accumulator.state = "thinking";
-			let aborted = false;
-			let stderrBuffer = "";
-			let pendingLine = "";
-			let resolved = false;
-
-			const consumeLine = (line: string): void => {
-				if (line.length === 0) return;
-				let parsed: unknown;
-				try { parsed = JSON.parse(line); } catch { return; }
-				if (!parsed || typeof parsed !== "object") return;
-				const event = parsed as StreamEvent;
-				if (typeof event.type !== "string") return;
-				if (!applyStreamEvent(accumulator, event)) return;
-				updateRun(member.name, {
-					state: accumulator.state,
-					transcript: accumulator.transcript,
-					activity: accumulator.activity,
-				});
-			};
-
-			handle.stdout.on("data", (chunk: Buffer) => {
-				pendingLine += chunk.toString("utf-8");
-				let newlineIndex = pendingLine.indexOf("\n");
-				while (newlineIndex !== -1) {
-					consumeLine(pendingLine.slice(0, newlineIndex));
-					pendingLine = pendingLine.slice(newlineIndex + 1);
-					newlineIndex = pendingLine.indexOf("\n");
-				}
+		try {
+			const parser = new StreamParser(member.name, task, {
+				onUpdate: (patch) => updateRun(member.name, patch),
+				now,
 			});
-			handle.stderr.on("data", (chunk: Buffer) => { stderrBuffer += chunk.toString("utf-8"); });
-
-			const onAbort = (): void => {
-				aborted = true;
-				handle.kill();
-			};
-			if (signal) {
-				if (signal.aborted) onAbort();
-				else signal.addEventListener("abort", onAbort, { once: true });
-			}
-
-			const finalize = (exitCode: number | null): void => {
-				if (resolved) return;
-				resolved = true;
-				if (pendingLine.length > 0) consumeLine(pendingLine);
-				signal?.removeEventListener("abort", onAbort);
-				handles.delete(member.name);
-
-				const failed =
-					aborted ||
-					exitCode !== 0 ||
-					accumulator.stopReason === "error" ||
-					accumulator.stopReason === "aborted" ||
-					accumulator.errorMessage !== undefined;
-
-				if (!failed) {
-					updateRun(member.name, {
-						state: "done",
-						endedAt: now(),
-						activity: null,
-						lastError: null,
-						pid: null,
-					});
-				} else {
-					const trimmedStderr = stderrBuffer.trim();
-					const lastError =
-						accumulator.errorMessage ??
-						(trimmedStderr.length > 0 ? trimmedStderr : null) ??
-						(aborted ? "aborted" : null) ??
-						`pi exited with code ${exitCode ?? "unknown"}`;
-					updateRun(member.name, {
-						state: "error",
-						endedAt: now(),
-						activity: null,
-						lastError,
-						pid: null,
-					});
-				}
-				resolve(runs.get(member.name) ?? createInitialRun(member.name, task));
-			};
-
-			handle.on("error", (error) => {
-				accumulator.errorMessage = error.message;
-				if (!handles.has(member.name)) finalize(null);
+			const finalPatch = await parser.parse(handle, signal);
+			updateRun(member.name, {
+				...finalPatch,
+				pid: null,
 			});
-			handle.on("close", finalize);
-		});
+		} finally {
+			handles.delete(member.name);
+		}
+
+		return runs.get(member.name) ?? createInitialRun(member.name, task);
 	};
 
 	const shutdown = (): void => {
