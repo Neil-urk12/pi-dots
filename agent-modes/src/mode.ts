@@ -59,10 +59,10 @@ class NullModeEffects implements ModeEffects {
 
 class NullModeDialogs implements ModeDialogs {
   async confirm(): Promise<boolean> {
-    throw new Error("Mode.bindContext(ctx) must be called before dialogs are used");
+    return false;
   }
   async select(): Promise<string | undefined> {
-    throw new Error("Mode.bindContext(ctx) must be called before dialogs are used");
+    return undefined;
   }
 }
 
