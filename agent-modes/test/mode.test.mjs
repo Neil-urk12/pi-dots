@@ -58,9 +58,10 @@ describe("Mode — full session lifecycle", () => {
     });
   });
 
-  it("dialogs throw before bindContext", async () => {
+  it("dialogs return noops before bindContext", async () => {
     const { mode } = makeMode();
-    await expect(() => mode.dialogs.confirm("t", "m")).rejects.toThrow(/bindContext/);
+    await expect(mode.dialogs.confirm("t", "m")).resolves.toBe(false);
+    await expect(mode.dialogs.select("p", ["a"])).resolves.toBeUndefined();
   });
 
   it("effects no-op before bindContext", async () => {
