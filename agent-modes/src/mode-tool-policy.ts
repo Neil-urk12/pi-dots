@@ -1,4 +1,5 @@
 import type { BashPolicy, ModeDefinition, PermissionAction, BashPatternConfig, ResolvedBashPatterns } from "./types.js";
+import { DELEGATION_TOOLS } from "./types.js";
 
 export type ModeCatalogMap = Map<string, { 
   enabled_tools?: string[]; 
@@ -66,7 +67,7 @@ export function findModesForTool(
     }
 
     // For delegation tools, also check allowed_agents
-    if (toolName === "subagent" || toolName === "Agent") {
+    if (DELEGATION_TOOLS.includes(toolName as typeof DELEGATION_TOOLS[number])) {
       const allowedAgents = def.allowed_agents;
       if (Array.isArray(allowedAgents) && allowedAgents.length > 0) {
         const requestedAgents = agentNamesFromInput(toolName, input);
@@ -380,7 +381,7 @@ export function evaluateToolCall({
   }
 
   // Agent name validation for delegation tools
-  if (toolName === "subagent" || toolName === "Agent") {
+  if (DELEGATION_TOOLS.includes(toolName as typeof DELEGATION_TOOLS[number])) {
     const allowedAgents = definition.allowed_agents;
     if (Array.isArray(allowedAgents) && allowedAgents.length > 0) {
       const requestedAgents = agentNamesFromInput(toolName, input);
