@@ -57,6 +57,9 @@ export const SAFE_FALLBACK_MODES = ["plan", "ask", "yolo"] as const;
 /** Fallback mode for interactive picker failures */
 export const PICKER_FALLBACK_MODE = "yolo" as const;
 
+/** Tool names that delegate work to subagents */
+export const DELEGATION_TOOLS = ["Agent", "subagent"] as const;
+
 /** Max allowed mode name length */
 export const MAX_MODE_NAME_LENGTH = 50 as const;
 

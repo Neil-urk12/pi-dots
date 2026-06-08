@@ -268,6 +268,24 @@ function applyUserOverrides(
       if (!perms || typeof perms !== "object" || Array.isArray(perms)) {
         diagnostics.push({ level: "error", message: `User override for ${mode}: permissions must be an object`, mode });
         delete filtered.permissions;
+      } else {
+        const invalidKeys: string[] = [];
+        for (const [tool, action] of Object.entries(perms)) {
+          if (tool.length === 0) {
+            invalidKeys.push("<empty>");
+            diagnostics.push({ level: "error", message: `User override for ${mode}: permissions keys must be non-empty strings`, mode });
+            continue;
+          }
+          if (!VALID_PERMISSION_ACTIONS.includes(action as PermissionAction)) {
+            invalidKeys.push(tool);
+            diagnostics.push({ level: "error", message: `User override for ${mode}: permissions.${tool} must be one of allow, ask, deny`, mode });
+            continue;
+          }
+        }
+        if (invalidKeys.length > 0) {
+          for (const k of invalidKeys) delete perms[k];
+          if (Object.keys(perms).length === 0) delete filtered.permissions;
+        }
       }
     }
 

@@ -6,7 +6,7 @@ import { injectIntoPayload } from "./payload-injection.js";
 import { evaluateToolCall, resolveBashPatterns } from "./mode-tool-policy.js";
 import { ModeFileWatcher } from "./mode-file-watcher.js";
 import type { ModeDefinition } from "./types.js";
-import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE, DEFAULT_MODE, SAFE_FALLBACK_MODES } from "./types.js";
+import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE, DEFAULT_MODE, SAFE_FALLBACK_MODES, DELEGATION_TOOLS } from "./types.js";
 import { PiModeEffects } from "./mode-effects.js";
 import { PiModeDialogs } from "./mode-dialogs.js";
 
@@ -414,7 +414,7 @@ export class Mode implements ModeStatusReader {
     const selectedName = await selectMode(options);
     if (!selectedName) return;
 
-    const mode = modes.find(m => m.toLowerCase() === selectedName) || PICKER_FALLBACK_MODE;
+    const mode = modes.find(m => m.toLowerCase() === selectedName.toLowerCase()) || PICKER_FALLBACK_MODE;
     this.setMode(mode);
   }
 
@@ -458,16 +458,18 @@ export class Mode implements ModeStatusReader {
 
   buildPromptInjection(): string | undefined {
     const mode = this.currentMode();
-    const promptSuffix = this.currentDefinition()?.prompt_suffix;
+    const definition = this.currentDefinition();
+    const promptSuffix = definition?.prompt_suffix;
     const base = promptSuffix ? `\n\n[MODE: ${mode.toUpperCase()}]\n${promptSuffix}` : `\n\n[MODE: ${mode.toUpperCase()}]`;
 
-    const definition = this.currentDefinition();
     const hasRestrictions = (definition?.enabled_tools && definition.enabled_tools.length > 0) || (definition?.bash_policy && definition.bash_policy !== "off");
     if (!hasRestrictions) return promptSuffix ? base : undefined;
 
     let injection = base;
 
-    if (mode === "orchestrator" || (definition?.allowed_agents && definition.allowed_agents.length > 0)) {
+    const enabledTools = definition?.enabled_tools;
+    const hasDelegationTools = enabledTools && enabledTools.length > 0 && DELEGATION_TOOLS.some(t => enabledTools.includes(t));
+    if (hasDelegationTools || (definition?.allowed_agents && definition.allowed_agents.length > 0)) {
       const available = this.discoverAvailableAgents();
       const allowed = definition?.allowed_agents;
       const agents = allowed && allowed.length > 0
@@ -583,7 +585,7 @@ export class Mode implements ModeStatusReader {
     else if (mode === "orchestrator") display = "🤝ORCH";
     else if (mode === "ask") display = "❓ASK";
 
-    this.effects.setStatus("mode", ctx.ui.theme.fg(style, display));
+    this.effects.setStatus("mode", typeof ctx.ui.theme.fg === "function" ? ctx.ui.theme.fg(style, display) : display);
   }
 
   private showStatus(): void {
