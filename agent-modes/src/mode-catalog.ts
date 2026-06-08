@@ -272,7 +272,7 @@ function applyUserOverrides(
         const invalidKeys: string[] = [];
         for (const [tool, action] of Object.entries(perms)) {
           if (tool.length === 0) {
-            invalidKeys.push("<empty>");
+            invalidKeys.push(tool); // push actual "" so delete perms[""] works
             diagnostics.push({ level: "error", message: `User override for ${mode}: permissions keys must be non-empty strings`, mode });
             continue;
           }
