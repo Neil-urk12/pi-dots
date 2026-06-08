@@ -1,11 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { CustomEditor } from "@earendil-works/pi-coding-agent";
 
-import { loadAllModes, notifyModeCatalogDiagnostics, type ModeCatalog } from "./mode-catalog.js";
+import { loadAllModes, notifyModeCatalogDiagnostics, ModeCatalog } from "./mode-catalog.js";
 import { injectIntoPayload } from "./payload-injection.js";
 import { evaluateToolCall, resolveBashPatterns } from "./mode-tool-policy.js";
 import { ModeFileWatcher } from "./mode-file-watcher.js";
-import type { ModeDefinition } from "./types.js";
+import type { ModeDefinition, BashPatternConfig } from "./types.js";
 import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE, DEFAULT_MODE, SAFE_FALLBACK_MODES, DELEGATION_TOOLS } from "./types.js";
 import { PiModeEffects } from "./mode-effects.js";
 import { PiModeDialogs } from "./mode-dialogs.js";
@@ -115,15 +115,15 @@ export class Mode implements ModeStatusReader {
   }
 
   currentDefinition(): ModeDefinition | undefined {
-    return this.catalog?.definitions.get(this._currentMode);
+    return this.catalog?.getDefinition(this._currentMode);
   }
 
   modes(): string[] {
-    return this.catalog ? Array.from(this.catalog.definitions.keys()) : [];
+    return this.catalog ? this.catalog.modes() : [];
   }
 
   definition(mode?: string): ModeDefinition | undefined {
-    return this.catalog?.definitions.get(mode ?? this._currentMode);
+    return this.catalog?.getDefinition(mode ?? this._currentMode);
   }
 
   sessionId(): string | undefined {
@@ -158,10 +158,8 @@ export class Mode implements ModeStatusReader {
     }
     notifyModeCatalogDiagnostics(ctx, result.diagnostics);
     this.catalog = result.catalog;
-    if (!this._currentMode || !this.catalog.definitions.has(this._currentMode)) {
-      this._currentMode = this.catalog.definitions.has(this.defaultMode)
-        ? this.defaultMode
-        : this.firstAvailableMode();
+    if (!this._currentMode || !this.catalog.hasMode(this._currentMode)) {
+      this._currentMode = this.catalog.resolveMode(this.defaultMode);
     }
   }
 
@@ -214,7 +212,7 @@ export class Mode implements ModeStatusReader {
   setMode(mode: string): { ok: boolean; mode?: string; error?: string } {
     if (!this.catalog) return { ok: false, error: "Mode catalog not initialized" };
     const requestedMode = normalizeMode(mode);
-    if (!requestedMode || !this.catalog.definitions.has(requestedMode)) {
+    if (!requestedMode || !this.catalog.hasMode(requestedMode)) {
       const message = `Invalid mode: ${mode}. Available: ${this.modes().join(", ")}`;
       this.effects.notify(message, "error");
       return { ok: false, error: message };
@@ -235,13 +233,16 @@ export class Mode implements ModeStatusReader {
     this.applyModeChange(modeChanged, modeChanged);
   }
 
-  acceptCatalog(catalog: ModeCatalog): void {
-    this.catalog = catalog;
+  acceptCatalog(catalog: ModeCatalog | { definitions: Map<string, ModeDefinition>; loadedAt: number; globalBashPatterns?: BashPatternConfig }): void {
+    const realCatalog = catalog instanceof ModeCatalog
+      ? catalog
+      : new ModeCatalog(catalog.definitions, catalog.loadedAt, catalog.globalBashPatterns);
+    this.catalog = realCatalog;
     let fallbackMode: string | undefined;
     let modeChanged = false;
 
-    if (!this.catalog.definitions.has(this._currentMode)) {
-      fallbackMode = this.safeFallbackMode();
+    if (!realCatalog.hasMode(this._currentMode)) {
+      fallbackMode = realCatalog.resolveMode(undefined, this.safeFallbackModes, this.defaultMode);
       modeChanged = fallbackMode !== this._currentMode;
       this._currentMode = fallbackMode;
     }
@@ -397,9 +398,7 @@ export class Mode implements ModeStatusReader {
     if (result.ok) {
       if (!this.catalog) {
         this.catalog = result.catalog;
-        this._currentMode = this.catalog.definitions.has(this.defaultMode)
-          ? this.defaultMode
-          : this.firstAvailableMode();
+        this._currentMode = this.catalog.resolveMode(this.defaultMode);
       }
       notifyModeCatalogDiagnostics(ctx, result.diagnostics);
       this.acceptCatalog(result.catalog);
@@ -519,22 +518,15 @@ export class Mode implements ModeStatusReader {
 
   private pickRestoreMode(cliMode?: string, derivedMode?: string): string {
     if (!this.catalog) return this.defaultMode;
-    const cli = normalizeMode(cliMode);
-    if (cli && this.catalog.definitions.has(cli)) return cli;
-
-    const derived = normalizeMode(derivedMode);
-    if (derived && this.catalog.definitions.has(derived)) return derived;
-
-    if (this.catalog.definitions.has(this._currentMode)) return this._currentMode;
-    return this.safeFallbackMode();
-  }
-
-  private safeFallbackMode(): string {
-    if (!this.catalog) return this.defaultMode;
-    for (const mode of this.safeFallbackModes) {
-      if (this.catalog.definitions.has(mode)) return mode;
-    }
-    return this.firstAvailableMode();
+    return this.catalog.resolveMode(
+      cliMode,
+      [
+        derivedMode ?? "",
+        this._currentMode,
+        ...this.safeFallbackModes
+      ],
+      this.defaultMode
+    );
   }
 
   private firstAvailableMode(): string {
