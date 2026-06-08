@@ -19,11 +19,44 @@ export interface ModeCatalogDiagnostic {
   file?: string;
 }
 
-export interface ModeCatalog {
-  definitions: Map<string, ModeDefinition>;
-  loadedAt: number;
-  globalBashPatterns?: BashPatternConfig;
+export class ModeCatalog {
+  constructor(
+    readonly definitions: Map<string, ModeDefinition>,
+    readonly loadedAt: number,
+    readonly globalBashPatterns?: BashPatternConfig
+  ) {}
+
+  hasMode(mode: string): boolean {
+    const normalized = mode.trim().toLowerCase();
+    return this.definitions.has(normalized);
+  }
+
+  getDefinition(mode: string): ModeDefinition | undefined {
+    const normalized = mode.trim().toLowerCase();
+    return this.definitions.get(normalized);
+  }
+
+  modes(): string[] {
+    return [...this.definitions.keys()];
+  }
+
+  resolveMode(requested: string | undefined, fallbacks: readonly string[] = [], defaultMode = "plan"): string {
+    if (requested) {
+      const normalized = requested.trim().toLowerCase();
+      if (this.definitions.has(normalized)) return normalized;
+    }
+
+    for (const mode of fallbacks) {
+      if (mode) {
+        const normalized = mode.trim().toLowerCase();
+        if (this.definitions.has(normalized)) return normalized;
+      }
+    }
+
+    return [...this.definitions.keys()][0] ?? defaultMode;
+  }
 }
+
 
 export type ModeCatalogResult =
   | { ok: true; catalog: ModeCatalog; diagnostics: ModeCatalogDiagnostic[] }
@@ -338,7 +371,7 @@ export function buildModeCatalog(input: BuildModeCatalogInput): ModeCatalogResul
 
   return {
     ok: true,
-    catalog: { definitions, loadedAt: input.now?.() ?? Date.now(), globalBashPatterns },
+    catalog: new ModeCatalog(definitions, input.now?.() ?? Date.now(), globalBashPatterns),
     diagnostics,
   };
 }
