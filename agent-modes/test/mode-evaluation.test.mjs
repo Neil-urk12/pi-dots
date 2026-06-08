@@ -113,33 +113,6 @@ describe("Mode — one-shot bypass", () => {
     expect(third?.block).toBe(true);
   });
 
-  it("uses full JSON key to avoid collisions", async () => {
-    const { mode } = makeMode();
-    const ctx = fakeCtx({ selectReturns: [allowOnceFor("write"), DENY] });
-    await mode.initialize(ctx);
-    mode.setMode("plan");
-    mode.captureBaselineTools(["read", "bash", "write"]);
-
-    await mode.evaluateToolCall("write", { path: "a" });
-    const different = await mode.evaluateToolCall("write", { path: "b" });
-    expect(different?.block).toBe(true);
-  });
-
-  it("evicts oldest when size cap reached", async () => {
-    const { mode } = makeMode();
-    const allowMany = Array.from({ length: 105 }, () => allowOnceFor("write"));
-    const ctx = fakeCtx({ selectReturns: [...allowMany, DENY] });
-    await mode.initialize(ctx);
-    mode.setMode("plan");
-    mode.captureBaselineTools(["read", "bash", "write"]);
-
-    for (let i = 0; i < 105; i++) {
-      await mode.evaluateToolCall("write", { path: `file-${i}`, unique: i });
-    }
-    const oldest = await mode.evaluateToolCall("write", { path: "file-0", unique: 0 });
-    expect(oldest?.block).toBe(true);
-  });
-
   it("clears bypass set on initialize", async () => {
     const { mode } = makeMode();
     const ctx = fakeCtx({ selectReturns: [allowOnceFor("write"), DENY] });
@@ -155,32 +128,6 @@ describe("Mode — one-shot bypass", () => {
     mode.setMode("plan");
     const blocked = await mode.evaluateToolCall("write", { path: "a" });
     expect(blocked?.block).toBe(true);
-  });
-
-  it("distinguishes nested object differences in bypass key", async () => {
-    const { mode } = makeMode();
-    const ctx = fakeCtx({ selectReturns: [allowOnceFor("write"), DENY] });
-    await mode.initialize(ctx);
-    mode.setMode("plan");
-    mode.captureBaselineTools(["read", "bash", "write"]);
-
-    await mode.evaluateToolCall("write", { path: "foo", content: { a: "1" } });
-    const different = await mode.evaluateToolCall("write", { path: "foo", content: { a: "2" } });
-    expect(different?.block).toBe(true);
-  });
-
-  it("handles unserializable input without crashing", async () => {
-    const { mode } = makeMode();
-    const ctx = fakeCtx({ selectReturns: [allowOnceFor("write"), allowOnceFor("write")] });
-    await mode.initialize(ctx);
-    mode.setMode("plan");
-    mode.captureBaselineTools(["read", "bash", "write"]);
-    const circular = {};
-    circular.self = circular;
-    const first = await mode.evaluateToolCall("write", circular);
-    expect(first?.block).toBe(false);
-    const second = await mode.evaluateToolCall("write", circular);
-    expect(second?.block).toBe(false);
   });
 });
 

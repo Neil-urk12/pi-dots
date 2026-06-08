@@ -308,9 +308,29 @@ test("valid bash_patterns with both add and remove on same key", () => {
   });
 
   expect(result.ok).toBe(true);
-  const def = result.catalog.definitions.get("code");
+  const def = result.catalog.getDefinition("code");
   expect(def.bash_patterns.safe.add).toEqual(["git status", "ls"]);
   expect(def.bash_patterns.safe.remove).toEqual(["pattern-x"]);
   expect(def.bash_patterns.destructive.add).toEqual(["rm -rf"]);
   expect(def.bash_patterns.destructive.remove).toEqual(["pattern-y"]);
+});
+
+test("ModeCatalog.resolveMode resolves requested, fallbacks, first available, or default", () => {
+  const result = buildModeCatalog({
+    modeDocuments: parsedRequiredModes(),
+  });
+  expect(result.ok).toBe(true);
+  const catalog = result.catalog;
+
+  // 1. Valid requested
+  expect(catalog.resolveMode("plan")).toBe("plan");
+  expect(catalog.resolveMode("  CODE ")).toBe("code");
+
+  // 2. Invalid requested, fallback matches
+  expect(catalog.resolveMode("invalid", ["yolo"])).toBe("yolo");
+  expect(catalog.resolveMode(undefined, ["invalid", "ask"])).toBe("ask");
+
+  // 3. None match, returns first available (which is the first key in the map)
+  const firstKey = [...catalog.definitions.keys()][0];
+  expect(catalog.resolveMode("invalid", ["nonexistent"])).toBe(firstKey);
 });
