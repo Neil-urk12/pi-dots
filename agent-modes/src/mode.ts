@@ -9,6 +9,7 @@ import type { ModeDefinition } from "./types.js";
 import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE, DEFAULT_MODE, SAFE_FALLBACK_MODES, DELEGATION_TOOLS } from "./types.js";
 import { PiModeEffects } from "./mode-effects.js";
 import { PiModeDialogs } from "./mode-dialogs.js";
+import { OneShotBypass } from "./mode-bypass.js";
 
 export interface ModeSelectOption {
   name: string;
@@ -47,9 +48,6 @@ export interface ModeOptions {
   safeFallbackModes?: readonly string[];
 }
 
-/** Max one-shot bypass entries per session. */
-const MAX_BYPASS_SIZE = 100;
-
 class NullModeEffects implements ModeEffects {
   setActiveTools(): void {}
   persistMode(): void {}
@@ -71,26 +69,6 @@ interface SubagentBridge {
   getAgents(): (string | { name: string })[];
 }
 
-function makeBypassKey(toolName: string, input: unknown): string {
-  let args = "";
-  if (input && typeof input === "object") {
-    try {
-      args = JSON.stringify(input, (_key, value) => {
-        if (value && typeof value === "object" && !Array.isArray(value)) {
-          return Object.keys(value).sort().reduce<Record<string, unknown>>((sorted, k) => {
-            sorted[k] = (value as Record<string, unknown>)[k];
-            return sorted;
-          }, {});
-        }
-        return value;
-      });
-    } catch {
-      args = "<unserializable>";
-    }
-  }
-  return `${toolName}:${args}`;
-}
-
 function normalizeMode(mode?: string): string | undefined {
   const normalized = mode?.trim().toLowerCase();
   return normalized || undefined;
@@ -102,7 +80,7 @@ export class Mode implements ModeStatusReader {
   private baselineTools: string[] = [];
   private ctx: ExtensionContext | undefined;
   private _sessionId: string | undefined;
-  private readonly _oneShotBypasses = new Set<string>();
+  private readonly bypass = new OneShotBypass();
   private reloadPending = false;
   private effects: ModeEffects = new NullModeEffects();
   private dialogs: ModeDialogs = new NullModeDialogs();
@@ -170,7 +148,7 @@ export class Mode implements ModeStatusReader {
   async initialize(ctx: ExtensionContext, sessionId?: string): Promise<void> {
     this.bindContext(ctx);
     this._sessionId = sessionId;
-    this._oneShotBypasses.clear();
+    this.bypass.clear();
 
     const result = await loadAllModes();
     if (!result.ok) {
@@ -285,9 +263,7 @@ export class Mode implements ModeStatusReader {
     const availableAgents = this.discoverAvailableAgents();
     const definition = this.currentDefinition();
 
-    const bypassKey = makeBypassKey(toolName, input);
-    if (this._oneShotBypasses.has(bypassKey)) {
-      this._oneShotBypasses.delete(bypassKey);
+    if (this.bypass.checkAndConsume(toolName, input)) {
       return { block: false };
     }
 
@@ -347,11 +323,7 @@ export class Mode implements ModeStatusReader {
       }
 
       if (choice.startsWith("Allow once")) {
-        if (this._oneShotBypasses.size >= MAX_BYPASS_SIZE) {
-          const oldest = this._oneShotBypasses.values().next().value;
-          if (oldest) this._oneShotBypasses.delete(oldest);
-        }
-        this._oneShotBypasses.add(bypassKey);
+        this.bypass.grant(toolName, input);
         this.effects.notify(`Allowed "${toolName}" once`, "info");
         return { block: false, warning: decision.warning };
       }
