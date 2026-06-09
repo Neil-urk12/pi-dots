@@ -5,7 +5,7 @@
 // (GitState, ResolvedConfig) stay with their owning modules.
 
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ResolvedConfig } from "./config.js";
+import type { ResolvedConfig } from "./configTypes.js";
 
 /** Color adapter used by all segment formatters. */
 export type ColorFn = (colorName: string, text: string) => string;

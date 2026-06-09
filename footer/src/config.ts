@@ -1,9 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
-import type { CleanFooterConfig, ConfigLoadResult } from "./configSchema.js";
-import { resolveConfigWithWarnings, mergeConfig } from "./configSchema.js";
-
-// Re-export everything from configSchema for backward compatibility
-export * from "./configSchema.js";
+import type { CleanFooterConfig, ConfigLoadResult } from "./configTypes.js";
+import { resolveConfigWithWarnings, mergeConfig } from "./configResolution.js";
 
 export function loadFooterConfig(globalPath: string, projectPath: string): ConfigLoadResult {
 	return loadConfig([globalPath, projectPath]);

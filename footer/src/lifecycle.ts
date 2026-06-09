@@ -1,7 +1,9 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import path from "node:path";
 
-import { defaultConfig, loadFooterConfig, type ResolvedConfig } from "./config.js";
+import { defaultConfig } from "./configPresets.js";
+import { loadFooterConfig } from "./config.js";
+import type { ResolvedConfig } from "./configTypes.js";
 import type { FooterInput, Totals, ToksDisplayState } from "./types.js";
 import { createGitState, type GitStateHandle } from "./git.js";
 import { accumulateTotals, accumulateCost } from "./tokens.js";

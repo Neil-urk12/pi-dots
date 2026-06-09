@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { renderFooter } from "./renderer.js";
 import type { FooterInput, Theme, Totals } from "./types.js";
-import { defaultConfig as baseDefaultConfig, type ResolvedConfig } from "./config.js";
+import { defaultConfig as baseDefaultConfig } from "./configPresets.js";
+import type { ResolvedConfig } from "./configTypes.js";
 
 const plainTheme = {
 	fg: (_name: string, text: string) => text,
