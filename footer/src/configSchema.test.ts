@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { defaultFooterLayouts, resolveConfigWithWarnings } from "./configSchema.js";
+import { defaultFooterLayouts } from "./configPresets.js";
+import { resolveConfigWithWarnings } from "./configResolution.js";
 
 describe("footer config layout resolution", () => {
 	it("uses default layouts when layouts are omitted", () => {

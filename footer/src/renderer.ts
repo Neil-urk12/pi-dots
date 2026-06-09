@@ -1,6 +1,6 @@
 import { layout } from "./layout.js";
 import type { ColorFn, FooterInput, Theme } from "./types.js";
-import type { FooterLayoutConfig, FooterSegmentId } from "./config.js";
+import type { FooterLayoutConfig, FooterSegmentId } from "./configTypes.js";
 import { formatModelName } from "./modelName.js";
 import { formatFullTokens, formatNoCacheTokens, formatTotalOnlyTokens } from "./tokenFormat.js";
 import { formatCount } from "./utils.js";
