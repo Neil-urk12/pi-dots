@@ -1,6 +1,6 @@
 {
   "name": "@neilurk12/pi-tokenrouter",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TokenRouter AI model provider extension for pi coding agent",
   "type": "module",
   "keywords": [

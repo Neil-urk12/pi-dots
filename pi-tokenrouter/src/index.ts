@@ -19,7 +19,7 @@ interface TokenRouterConfig {
 }
 
 const DEFAULT_MODELS: TokenRouterModel[] = [
-  { id: "MiniMax-M3", name: "MiniMax M3", contextWindow: 1_000_000 },
+  { id: "MiniMax-M3", name: "MiniMax M3", contextWindow: 1_000_000, maxTokens: 524_288 },
 ];
 
 function loadConfig(): TokenRouterConfig {
