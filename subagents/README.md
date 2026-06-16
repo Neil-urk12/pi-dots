@@ -48,15 +48,21 @@ task: |
   Implement the requested change end-to-end. State the file paths touched in the summary.
 ```
 
-The required fields:
+The fields:
 
-- `name` — what you'll call them in `nano_agent_spawn`
-- `role` — one lowercased word (developer, reviewer, analyst…)
-- `model` — any model id pi knows about
-- `instructions` — system prompt for the subagent
-- `task` — default task; can be overridden per spawn
+- `name` — what you'll call them in `nano_agent_spawn` (required)
+- `role` — one lowercased word (developer, reviewer, analyst…) (required)
+- `model` — any model id pi knows about (optional; omit to inherit pi's default, matching `@narumitw/pi-subagents`)
+- `instructions` — system prompt for the subagent (required)
+- `task` — default task; can be overridden per spawn (required)
 
 Run `/reload` after editing. A few starter agents live in `examples/team/` if you want to copy from.
+
+## Trust model
+
+Every agent in your team is equally trusted. `nano_agent_aggregate` and `nano_agent_chain` pass prior outputs verbatim into the next agent's prompt — the aggregator sees the raw text of every upstream step substituted into `{previous}`. There is no sandboxing, no escaping, no output filtering.
+
+This is by design: the agents are subprocesses you've explicitly chosen to run, and your own YAML defines their system prompts. If you wouldn't trust an agent with the rest of your work, don't add it to your team. The same caveat applies to every multi-agent system (Claude Code subagents, LangGraph, CrewAI, etc.) that passes outputs between agents — the trust boundary is your own team definition.
 
 ## Install
 
