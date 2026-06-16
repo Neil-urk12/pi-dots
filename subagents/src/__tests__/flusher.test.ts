@@ -7,6 +7,7 @@ import {
 	FLUSH_DEBOUNCE_MS,
 	ANIMATION_FRAME_MS,
 	createWidgetFlusher,
+	formatStatusText,
 } from "../flusher.ts";
 import { FakeClock, SpyWidgetSink, makeMember, makeRun, stubTheme } from "./helpers.ts";
 
@@ -213,5 +214,92 @@ describe("WidgetFlusher — tick escape hatch", () => {
 		expect(sink.calls).toHaveLength(4);
 		const distinctOutputs = new Set(sink.calls.map((c) => c.lines!.join("\n")));
 		expect(distinctOutputs.size).toBeGreaterThan(1);
+	});
+});
+
+describe("formatStatusText", () => {
+	const team = (size: number): Map<string, ReturnType<typeof makeMember>> => {
+		const m = new Map<string, ReturnType<typeof makeMember>>();
+		for (let i = 0; i < size; i++) m.set(`a${i}`, makeMember(`a${i}`));
+		return m;
+	};
+
+	test("returns undefined when no agents are live", () => {
+		const runs = [makeRun("a0", "done"), makeRun("a1", "error")];
+		expect(formatStatusText(runs, team(2))).toBeUndefined();
+	});
+
+	test("returns undefined when no runs exist", () => {
+		expect(formatStatusText([], team(3))).toBeUndefined();
+	});
+
+	test("lists a single live agent without an idle count", () => {
+		const runs = [makeRun("scout", "thinking")];
+		expect(formatStatusText(runs, team(1))).toBe("scout: thinking");
+	});
+
+	test("joins multiple live agents with ' · '", () => {
+		const runs = [makeRun("scout", "thinking"), makeRun("worker", "working")];
+		expect(formatStatusText(runs, team(2))).toBe("scout: thinking · worker: working");
+	});
+
+	test("appends the idle count when team has members without live runs", () => {
+		const runs = [makeRun("scout", "working")];
+		expect(formatStatusText(runs, team(3))).toBe("scout: working · 2 idle");
+	});
+
+	test("ignores terminal agents when computing live and idle counts", () => {
+		const runs = [makeRun("a0", "working"), makeRun("a1", "done"), makeRun("a2", "error")];
+		// Only `a0` is live. a1, a2 are terminal (not counted as idle because they have runs).
+		// team size = 4 → idle = 4 - 1 = 3
+		expect(formatStatusText(runs, team(4))).toBe("a0: working · 3 idle");
+	});
+});
+
+describe("WidgetFlusher — setStatus integration", () => {
+	const captureStatus = (): { calls: (string | undefined)[]; push: (text: string | undefined) => void } => {
+		const calls: (string | undefined)[] = [];
+		return { calls, push: (text) => calls.push(text) };
+	};
+
+	test("calls setStatus with the live-agent summary on flush", () => {
+		const status = captureStatus();
+		const { clock, flusher } = buildDeps({ setStatus: status.push });
+		flusher.schedule();
+		clock.advance(FLUSH_DEBOUNCE_MS);
+		expect(status.calls).toEqual(["alpha: working"]);
+	});
+
+	test("clears the status when no agents are live", () => {
+		const status = captureStatus();
+		const runs = [makeRun("alpha", "working")];
+		const { clock, flusher } = buildDeps({
+			setStatus: status.push,
+			getRunner: () => ({ list: () => runs }),
+		});
+		flusher.schedule();
+		clock.advance(FLUSH_DEBOUNCE_MS);
+		// First flush: live
+		expect(status.calls[status.calls.length - 1]).toBe("alpha: working");
+		// Agent finishes; next animation tick clears the status
+		runs[0] = makeRun("alpha", "done");
+		clock.advance(ANIMATION_FRAME_MS);
+		expect(status.calls[status.calls.length - 1]).toBeUndefined();
+	});
+
+	test("dispose() clears the status", () => {
+		const status = captureStatus();
+		const { clock, flusher } = buildDeps({ setStatus: status.push });
+		flusher.schedule();
+		clock.advance(FLUSH_DEBOUNCE_MS);
+		expect(status.calls[status.calls.length - 1]).toBe("alpha: working");
+		flusher.dispose();
+		expect(status.calls[status.calls.length - 1]).toBeUndefined();
+	});
+
+	test("does not throw when setStatus is omitted", () => {
+		const { clock, flusher } = buildDeps();
+		flusher.schedule();
+		expect(() => clock.advance(FLUSH_DEBOUNCE_MS)).not.toThrow();
 	});
 });

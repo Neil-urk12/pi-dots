@@ -38,9 +38,30 @@ export type WidgetFlusherDeps = Readonly<{
 	getTeam: () => ReadonlyMap<string, TeamMember>;
 	getCols: () => number;
 	theme: Theme;
+	setStatus?: (text: string | undefined) => void;
 }>;
 
 type RunnerLike = Readonly<{ list(): readonly AgentRun[] }>;
+
+/**
+ * Build a one-line status summary of the live swarm. Returns undefined when
+ * nothing is live, so callers can clear the status line.
+ *
+ * Examples:
+ *   ("scout: thinking · worker: working", team=2)     → "scout: thinking · worker: working"
+ *   ("scout: thinking", team=3)                       → "scout: thinking · 2 idle"
+ *   ([], team=3)                                      → undefined
+ */
+export const formatStatusText = (
+	runs: readonly AgentRun[],
+	team: ReadonlyMap<string, TeamMember>,
+): string | undefined => {
+	const liveRuns = runs.filter((run) => LIVE_AGENT_STATES.has(run.state));
+	if (liveRuns.length === 0) return undefined;
+	const live = liveRuns.map((run) => `${run.name}: ${run.state}`).join(" · ");
+	const idleCount = team.size - liveRuns.length;
+	return idleCount > 0 ? `${live} · ${idleCount} idle` : live;
+};
 
 export const createWidgetFlusher = (deps: WidgetFlusherDeps): WidgetFlusher => {
 	let pendingTimer: TimerHandle | null = null;
@@ -59,6 +80,7 @@ export const createWidgetFlusher = (deps: WidgetFlusherDeps): WidgetFlusher => {
 		if (!runner) {
 			disarmAnimation();
 			deps.sink.setWidget(WIDGET_KEY, undefined, { placement: WIDGET_PLACEMENT });
+			deps.setStatus?.(undefined);
 			return;
 		}
 		const runs = runner.list();
@@ -74,6 +96,7 @@ export const createWidgetFlusher = (deps: WidgetFlusherDeps): WidgetFlusher => {
 			lines.length > 0 ? lines : undefined,
 			{ placement: WIDGET_PLACEMENT },
 		);
+		deps.setStatus?.(formatStatusText(runs, deps.getTeam()));
 		const hasLiveAgent = runs.some((run) => LIVE_AGENT_STATES.has(run.state));
 		disarmAnimation();
 		if (hasLiveAgent) {
@@ -104,6 +127,7 @@ export const createWidgetFlusher = (deps: WidgetFlusherDeps): WidgetFlusher => {
 			}
 			disarmAnimation();
 			deps.sink.setWidget(WIDGET_KEY, undefined, { placement: WIDGET_PLACEMENT });
+			deps.setStatus?.(undefined);
 		},
 	};
 };
