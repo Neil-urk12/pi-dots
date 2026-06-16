@@ -305,6 +305,128 @@ describe("Subagent lifecycle", () => {
 	});
 });
 
+describe("Subagent timeout", () => {
+	test("times out after timeoutMs and marks the run as error", async () => {
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+
+		const promise = subagent.spawn(member(), "test task", undefined, 10);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		// Wait for the timeout to fire, then the close handler runs
+		await new Promise((r) => setTimeout(r, 30));
+		expect(handle.killed).toBe(true);
+
+		handle.emitClose(null);
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toBe("timed out after 10ms");
+	});
+
+	test("clears the timer when the agent finishes before timeout", async () => {
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+
+		const promise = subagent.spawn(member(), "test task", undefined, 1000);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "fast" }],
+					stopReason: "end_turn",
+				},
+			}),
+		);
+		handle.emitClose(0);
+		const run = await promise;
+		expect(run.state).toBe("done");
+		expect(run.transcript).toBe("fast");
+		// If the timer were not cleared it would fire ~1s later, but since
+		// the run is already terminal there is no observable effect — this
+		// test mainly guards that the happy path still works with a timeout
+		// configured.
+	});
+
+	test("timeoutMs of 0 is treated as no timeout", async () => {
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+
+		const promise = subagent.spawn(member(), "test task", undefined, 0);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		// Wait well past what a real timeout would have been — nothing should
+		// fire because the 0-ms branch is treated as "not set".
+		await new Promise((r) => setTimeout(r, 20));
+		expect(handle.killed).toBe(false);
+
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [{ type: "text", text: "ok" }],
+					stopReason: "end_turn",
+				},
+			}),
+		);
+		handle.emitClose(0);
+		const run = await promise;
+		expect(run.state).toBe("done");
+	});
+
+	test("user signal abort after timeout does not overwrite the lastError", async () => {
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+		const controller = new AbortController();
+
+		const promise = subagent.spawn(member(), "test task", controller.signal, 10);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		// Let the timeout fire first — it sets timeoutFired=true and kills the handle.
+		await new Promise((r) => setTimeout(r, 30));
+		expect(handle.killed).toBe(true);
+
+		// Now trigger the user signal abort. The onAbort guard
+		// `if (timeoutFired) return;` must prevent `aborted` from being set,
+		// so the lastError keeps the more informative "timed out" message.
+		controller.abort();
+
+		handle.emitClose(null);
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toBe("timed out after 10ms");
+	});
+
+	test("omits --model from subprocess args when the team member has no model", async () => {
+		const { factory, handles, calls } = createFakeFactory();
+		const subagent = createSubagent("/test/cwd", { factory });
+
+		const noModelMember: TeamMember = Object.freeze({
+			name: "no-model-agent",
+			role: "coder",
+			instructions: "You are a test agent without a model.",
+			task: "do something",
+			sourceFile: "no-model.yaml",
+		});
+
+		const promise = subagent.spawn(noModelMember, "task", undefined);
+		await yieldToRunner();
+
+		expect(calls).toHaveLength(1);
+		expect(calls[0]!.args).not.toContain("--model");
+
+		handles[0]!.emitClose(0);
+		await promise;
+	});
+});
+
 describe("Subagent concurrency", () => {
 	test("semaphore limits concurrent spawns", async () => {
 		const { factory, handles } = createFakeFactory();

@@ -11,7 +11,7 @@ export type LoadResult = Readonly<{
 	errors: readonly string[];
 }>;
 
-const REQUIRED_FIELDS = ["name", "role", "instructions", "task", "model"] as const;
+const REQUIRED_FIELDS = ["name", "role", "instructions", "task"] as const;
 
 const isNonEmptyString = (value: unknown): value is string =>
 	typeof value === "string" && value.trim().length > 0;
@@ -65,6 +65,10 @@ export const loadTeam = async (cwd: string): Promise<LoadResult> => {
 			errors.push(`${file.displayPath}: missing or empty field(s): ${missing.join(", ")}`);
 			continue;
 		}
+		if (record.model !== undefined && !isNonEmptyString(record.model)) {
+			errors.push(`${file.displayPath}: 'model' must be a non-empty string if specified`);
+			continue;
+		}
 		const role = (record.role as string).trim().toLowerCase();
 		if (role.includes(" ")) {
 			errors.push(`${file.displayPath}: 'role' must be a single word (got '${role}')`);
@@ -83,7 +87,7 @@ export const loadTeam = async (cwd: string): Promise<LoadResult> => {
 			role,
 			instructions: (record.instructions as string).trim(),
 			task: (record.task as string).trim(),
-			model: (record.model as string).trim(),
+			...(isNonEmptyString(record.model) ? { model: (record.model as string).trim() } : {}),
 			sourceFile: file.displayPath,
 		}));
 	}

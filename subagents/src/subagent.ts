@@ -1,11 +1,16 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type AgentRun, createInitialRun, LIVE_AGENT_STATES, type TeamMember } from "./types.ts";
-import { StreamParser } from "./stream-parser.ts";
+import { type AgentRun, type AgentState, createInitialRun, LIVE_AGENT_STATES, type TeamMember } from "./types.ts";
+import { applyStreamEvent, createAccumulator, type StreamEvent } from "./stream-parser.ts";
 import { type ProcessFactory, type ProcessHandle, ChildProcessAdapter } from "./process.ts";
 
 export type Subagent = Readonly<{
-	spawn(member: TeamMember, task: string, signal: AbortSignal | undefined): Promise<AgentRun>;
+	spawn(
+		member: TeamMember,
+		task: string,
+		signal: AbortSignal | undefined,
+		timeoutMs?: number,
+	): Promise<AgentRun>;
 	kill(name: string): boolean;
 	list(): readonly AgentRun[];
 	get(name: string): AgentRun | undefined;
@@ -89,6 +94,7 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 		member: TeamMember,
 		task: string,
 		signal: AbortSignal | undefined,
+		timeoutMs: number | undefined,
 	): Promise<AgentRun> => {
 		if (isShuttingDown) throw new Error(`subagent is shut down`);
 
@@ -118,8 +124,12 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 			"--mode", "json",
 			"-p",
 			"--no-session",
-			"--model", member.model,
 		];
+		// If the team member has no model, omit --model so the subprocess
+		// falls back to pi's default (matching @narumitw/pi-subagents).
+		if (member.model !== undefined) {
+			baseArgs.push("--model", member.model);
+		}
 
 		let handle: ProcessHandle;
 		try {
@@ -137,13 +147,112 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 		updateRun(member.name, { pid: handle.pid ?? null });
 
 		try {
-			const parser = new StreamParser(member.name, task, {
-				onUpdate: (patch) => updateRun(member.name, patch),
-				now,
+			// Local mirror of the run's state. Kept in sync via updateRun()
+			// below; the functional stream-parser API returns whether anything
+			// changed so we only notify subscribers on real transitions.
+			const acc = createAccumulator();
+			acc.state = "thinking";
+			let aborted = false;
+			let stderrBuffer = "";
+			let pendingLine = "";
+			let resolved = false;
+			let timeoutFired = false;
+			let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+			if (timeoutMs !== undefined && timeoutMs > 0) {
+				timeoutHandle = setTimeout(() => {
+					timeoutFired = true;
+					handle.kill();
+				}, timeoutMs);
+				timeoutHandle.unref?.();
+			}
+
+			const consumeLine = (line: string): void => {
+				if (line.length === 0) return;
+				let parsed: unknown;
+				try {
+					parsed = JSON.parse(line);
+				} catch {
+					return;
+				}
+				if (!parsed || typeof parsed !== "object") return;
+				const event = parsed as StreamEvent;
+				if (typeof event.type !== "string") return;
+				if (!applyStreamEvent(acc, event)) return;
+				updateRun(member.name, {
+					state: acc.state,
+					transcript: acc.transcript,
+					activity: acc.activity,
+				});
+			};
+
+			handle.stdout.on("data", (chunk: Buffer) => {
+				pendingLine += chunk.toString("utf-8");
+				let newlineIndex = pendingLine.indexOf("\n");
+				while (newlineIndex !== -1) {
+					consumeLine(pendingLine.slice(0, newlineIndex));
+					pendingLine = pendingLine.slice(newlineIndex + 1);
+					newlineIndex = pendingLine.indexOf("\n");
+				}
 			});
-			const finalPatch = await parser.parse(handle, signal);
+
+			handle.stderr.on("data", (chunk: Buffer) => {
+				stderrBuffer += chunk.toString("utf-8");
+			});
+
+			const onAbort = (): void => {
+				// A timeout already flipped the state — don't overwrite the
+				// reason with a generic "aborted" label.
+				if (timeoutFired) return;
+				aborted = true;
+				handle.kill();
+			};
+			if (signal) {
+				if (signal.aborted) onAbort();
+				else signal.addEventListener("abort", onAbort, { once: true });
+			}
+
+			const finalState: { state: AgentState; endedAt: number; lastError: string | null } =
+				await new Promise((resolve) => {
+					const finalize = (exitCode: number | null): void => {
+						if (resolved) return;
+						resolved = true;
+						if (timeoutHandle) {
+							clearTimeout(timeoutHandle);
+							timeoutHandle = null;
+						}
+						if (pendingLine.length > 0) consumeLine(pendingLine);
+						signal?.removeEventListener("abort", onAbort);
+						const failed =
+							aborted ||
+							exitCode !== 0 ||
+							acc.stopReason === "error" ||
+							acc.stopReason === "aborted" ||
+							acc.errorMessage !== undefined;
+						if (!failed) {
+							resolve({ state: "done", endedAt: now(), lastError: null });
+							return;
+						}
+						const trimmedStderr = stderrBuffer.trim();
+						const lastError =
+							acc.errorMessage ??
+							(trimmedStderr.length > 0 ? trimmedStderr : null) ??
+							(timeoutFired ? `timed out after ${timeoutMs}ms` : null) ??
+							(aborted ? "aborted" : null) ??
+							`pi exited with code ${exitCode ?? "unknown"}`;
+						resolve({ state: "error", endedAt: now(), lastError });
+					};
+					handle.on("error", (error) => {
+						acc.errorMessage = error.message;
+						finalize(null);
+					});
+					handle.on("close", finalize);
+				});
+
 			updateRun(member.name, {
-				...finalPatch,
+				state: finalState.state,
+				endedAt: finalState.endedAt,
+				activity: null,
+				lastError: finalState.lastError,
 				pid: null,
 			});
 		} finally {
@@ -171,7 +280,8 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 	process.on("exit", onProcessExit);
 
 	return Object.freeze({
-		spawn: (member, task, signal) => semaphore.run(() => spawnAgent(member, task, signal)),
+		spawn: (member, task, signal, timeoutMs) =>
+			semaphore.run(() => spawnAgent(member, task, signal, timeoutMs)),
 		kill: (name) => {
 			const handle = handles.get(name);
 			if (!handle) return false;

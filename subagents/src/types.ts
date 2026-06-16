@@ -5,7 +5,7 @@ export type TeamMember = Readonly<{
 	role: string;
 	instructions: string;
 	task: string;
-	model: string;
+	model?: string;
 	sourceFile: string;
 }>;
 
