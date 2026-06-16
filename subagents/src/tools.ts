@@ -12,6 +12,13 @@ export const SpawnParams = Type.Object({
 	task: Type.Optional(
 		Type.String({ description: "Override the agent's default task. Falls back to YAML 'task' when omitted." }),
 	),
+	timeoutMs: Type.Optional(
+		Type.Number({
+			description:
+				"Wall-clock timeout in milliseconds. If the agent runs longer, it is killed and the run is marked as error with a 'timed out after Xms' message.",
+			minimum: 1,
+		}),
+	),
 });
 
 export const KillParams = Type.Object({
@@ -24,9 +31,173 @@ export const StatusParams = Type.Object({
 	),
 });
 
+export const StepParams = Type.Object({
+	name: Type.String({ description: "Team member name (matches YAML 'name' field)" }),
+	task: Type.Optional(
+		Type.String({
+			description:
+				"Override the agent's default task. Falls back to YAML 'task' when omitted. Use '{previous}' as a placeholder for the prior step's output.",
+		}),
+	),
+});
+
+export const AggregateParams = Type.Object({
+	tasks: Type.Array(StepParams, {
+		minItems: 1,
+		description: "Parallel tasks to run before the aggregator.",
+	}),
+	aggregator: Type.Object({
+		name: Type.String({ description: "Aggregator team member name (matches YAML 'name' field)." }),
+		task: Type.String({
+			description:
+				"Aggregator task. Use '{previous}' anywhere to receive the joined prior outputs (one block per task).",
+		}),
+	}),
+	timeoutMs: Type.Optional(
+		Type.Number({
+			description: "Per-spawn wall-clock timeout in milliseconds. Applies to all tasks and the aggregator.",
+			minimum: 1,
+		}),
+	),
+});
+
+export const ChainParams = Type.Object({
+	steps: Type.Array(StepParams, {
+		minItems: 1,
+		description:
+			"Sequential steps. Each step's '{previous}' is replaced with the prior step's output (empty for the first step).",
+	}),
+	timeoutMs: Type.Optional(
+		Type.Number({
+			description: "Per-spawn wall-clock timeout in milliseconds. Applies to all steps.",
+			minimum: 1,
+		}),
+	),
+});
+
 export type SpawnArgs = Static<typeof SpawnParams>;
 export type KillArgs = Static<typeof KillParams>;
 export type StatusArgs = Static<typeof StatusParams>;
+export type StepArgs = Static<typeof StepParams>;
+export type AggregateArgs = Static<typeof AggregateParams>;
+export type ChainArgs = Static<typeof ChainParams>;
+
+type SpawnFn = (
+	member: TeamMember,
+	task: string,
+	signal: AbortSignal | undefined,
+	timeoutMs: number | undefined,
+) => Promise<AgentRun>;
+
+type StepResult = Readonly<{ name: string; output: string }>;
+
+const formatPriorOutputs = (results: readonly StepResult[]): string =>
+	results.map((result) => `=== ${result.name} ===\n${result.output}`).join("\n\n");
+
+export type AggregateResult = Readonly<{
+	output: string;
+	tasks: readonly StepResult[];
+	aggregatorRun: AgentRun;
+}>;
+
+/**
+ * Run a list of tasks in parallel, then run an aggregator with the joined
+ * prior outputs substituted as {previous}. The spawn function is injected so
+ * the same logic is testable without a live Subagent.
+ */
+export const runAggregate = async (
+	params: AggregateArgs,
+	signal: AbortSignal | undefined,
+	getTeam: () => ReadonlyMap<string, TeamMember>,
+	spawn: SpawnFn,
+): Promise<AggregateResult> => {
+	const team = getTeam();
+	for (const t of params.tasks) {
+		if (!team.has(t.name)) {
+			throw new Error(`unknown agent '${t.name}'. available: ${formatAvailableAgents(team)}`);
+		}
+	}
+	if (!team.has(params.aggregator.name)) {
+		throw new Error(`unknown agent '${params.aggregator.name}'. available: ${formatAvailableAgents(team)}`);
+	}
+
+	const taskResults = await Promise.all(
+		params.tasks.map(async (t): Promise<StepResult> => {
+			const member = team.get(t.name)!;
+			const taskText = (t.task ?? member.task).trim();
+			if (taskText.length === 0) {
+				throw new Error(`no task supplied for '${t.name}' and YAML 'task' is empty`);
+			}
+			const run = await spawn(member, taskText, signal, params.timeoutMs);
+			if (run.state === "error") {
+				throw new Error(`${t.name} failed: ${run.lastError || run.transcript}`);
+			}
+			return { name: t.name, output: run.transcript || "" };
+		}),
+	);
+
+	const aggregatorMember = team.get(params.aggregator.name)!;
+	const aggregatorTask = params.aggregator.task.replaceAll(
+		"{previous}",
+		formatPriorOutputs(taskResults),
+	);
+	const aggregatorRun = await spawn(aggregatorMember, aggregatorTask, signal, params.timeoutMs);
+	if (aggregatorRun.state === "error") {
+		throw new Error(
+			`aggregator '${params.aggregator.name}' failed: ${aggregatorRun.lastError || aggregatorRun.transcript}`,
+		);
+	}
+
+	return {
+		output: aggregatorRun.transcript || "(no output)",
+		tasks: taskResults,
+		aggregatorRun,
+	};
+};
+
+export type ChainResult = Readonly<{
+	output: string;
+	steps: readonly StepResult[];
+}>;
+
+/**
+ * Run a list of steps sequentially. Each step's task has all occurrences of
+ * {previous} replaced with the prior step's output (empty string for step 0).
+ */
+export const runChain = async (
+	params: ChainArgs,
+	signal: AbortSignal | undefined,
+	getTeam: () => ReadonlyMap<string, TeamMember>,
+	spawn: SpawnFn,
+): Promise<ChainResult> => {
+	const team = getTeam();
+	const stepResults: StepResult[] = [];
+	let previous = "";
+
+	for (let i = 0; i < params.steps.length; i++) {
+		const step = params.steps[i]!;
+		if (!team.has(step.name)) {
+			throw new Error(
+				`step ${i}: unknown agent '${step.name}'. available: ${formatAvailableAgents(team)}`,
+			);
+		}
+		const member = team.get(step.name)!;
+		const taskText = (step.task ?? member.task).replaceAll("{previous}", previous);
+		const run = await spawn(member, taskText, signal, params.timeoutMs);
+		if (run.state === "error") {
+			throw new Error(`step ${i} ('${step.name}') failed: ${run.lastError || run.transcript}`);
+		}
+		const output = run.transcript || "";
+		stepResults.push({ name: step.name, output });
+		previous = output;
+	}
+
+	const last = stepResults[stepResults.length - 1];
+	return {
+		output: last?.output || "(no output)",
+		steps: stepResults,
+	};
+};
 
 const asTextContent = (text: string) => ({ type: "text" as const, text });
 
@@ -106,13 +277,16 @@ export const registerTools = (
 	subagent: Subagent,
 	getTeam: () => ReadonlyMap<string, TeamMember>,
 ): void => {
+	const spawn: SpawnFn = (member, task, signal, timeoutMs) =>
+		subagent.spawn(member, task, signal, timeoutMs);
+
 	pi.registerTool({
 		name: "nano_agent_spawn",
 		label: "Spawn nano-team agent",
 		description:
 			"Run a pre-defined team member as an isolated pi subagent. The agent's YAML 'task' is the default; pass `task` to override per call. Multiple agents can run in parallel via parallel tool calls.",
 		promptSnippet:
-			"`nano_agent_spawn(name, task?)` — delegate a subtask to a pre-defined nano-team member.",
+			"`nano_agent_spawn(name, task?, timeoutMs?)` — delegate a subtask to a pre-defined nano-team member.",
 		parameters: SpawnParams,
 		async execute(_toolCallId, params: SpawnArgs, signal) {
 			const team = getTeam();
@@ -124,7 +298,7 @@ export const registerTools = (
 			if (!task) {
 				throw new Error(`no task supplied for '${params.name}' and YAML 'task' is empty`);
 			}
-			const run = await subagent.spawn(member, task, signal);
+			const run = await subagent.spawn(member, task, signal, params.timeoutMs);
 			if (run.state === "error") {
 				throw new Error(run.lastError || run.transcript || `agent '${params.name}' failed`);
 			}
@@ -179,6 +353,40 @@ export const registerTools = (
 			return {
 				content: [asTextContent(renderStatusTable(team, allRuns))],
 				details: { team: teamArray, runs: allRuns },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "nano_agent_aggregate",
+		label: "Aggregate nano-team agents",
+		description:
+			"Run multiple subagents in parallel, then run an aggregator with the joined prior outputs substituted as {previous}. Composes nano_agent_spawn.",
+		promptSnippet:
+			"`nano_agent_aggregate(tasks, aggregator, timeoutMs?)` — run N agents in parallel, then aggregate.",
+		parameters: AggregateParams,
+		async execute(_toolCallId, params: AggregateArgs, signal) {
+			const result = await runAggregate(params, signal, getTeam, spawn);
+			return {
+				content: [asTextContent(result.output)],
+				details: { tasks: result.tasks, aggregator: result.aggregatorRun },
+			};
+		},
+	});
+
+	pi.registerTool({
+		name: "nano_agent_chain",
+		label: "Chain nano-team agents",
+		description:
+			"Run subagents sequentially. Each step's {previous} is replaced with the prior step's output. The final step's output is returned.",
+		promptSnippet:
+			"`nano_agent_chain(steps, timeoutMs?)` — run agents sequentially, chaining outputs via {previous}.",
+		parameters: ChainParams,
+		async execute(_toolCallId, params: ChainArgs, signal) {
+			const result = await runChain(params, signal, getTeam, spawn);
+			return {
+				content: [asTextContent(result.output)],
+				details: { steps: result.steps },
 			};
 		},
 	});
