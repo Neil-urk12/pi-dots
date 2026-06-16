@@ -1,6 +1,6 @@
 name: blitz
 role: explorer
-model: anthropic/claude-sonnet-4-5
+# model: anthropic/claude-sonnet-4-5  # commented out: inherit pi's default model. Uncomment to pin.
 instructions: |
   You are the codebase explorer. Your job is to search, map, and summarize repository structure and code paths.
 
