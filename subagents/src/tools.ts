@@ -6,6 +6,7 @@ import {
 	createInitialRun,
 	type TeamMember,
 } from "./types.ts";
+import { getErrorMessage } from "./errors.ts";
 
 export const SpawnParams = Type.Object({
 	name: Type.String({ description: "Team member name (matches YAML 'name' field)" }),
@@ -15,11 +16,21 @@ export const SpawnParams = Type.Object({
 	timeoutMs: Type.Optional(
 		Type.Number({
 			description:
-				"Wall-clock timeout in milliseconds. If the agent runs longer, it is killed and the run is marked as error with a 'timed out after Xms' message.",
+				"Wall-clock timeout in milliseconds. If the agent runs longer, it is killed and the run is marked as error with a 'timed out after Xms' message. Defaults to 300000 (5 minutes) if omitted.",
 			minimum: 1,
 		}),
 	),
 });
+
+/**
+ * Default per-spawn wall-clock timeout. Empirical observation across
+ * parallel-spawn benchmarks: real model calls land in 20-60s but
+ * rate-limited calls can block 2-3 minutes before the API replies.
+ * 5 minutes (300_000ms) gives 5-10x headroom over typical calls and
+ * absorbs a single rate-limit retry window. Override per-call with
+ * `timeoutMs`. For long-running batches, pass a higher value explicitly.
+ */
+export const DEFAULT_SPAWN_TIMEOUT_MS = 300_000;
 
 export const KillParams = Type.Object({
 	name: Type.String({ description: "Team member name to abort" }),
@@ -36,7 +47,7 @@ export const StepParams = Type.Object({
 	task: Type.Optional(
 		Type.String({
 			description:
-				"Override the agent's default task. Falls back to YAML 'task' when omitted. Use '{previous}' as a placeholder for the prior step's output.",
+				"Override the agent's default task. Falls back to YAML 'task' when omitted. Use '{previous}' as a placeholder for the prior step's output. Write '{{previous}}' (doubled braces) to embed the literal token without substitution.",
 		}),
 	),
 });
@@ -44,13 +55,13 @@ export const StepParams = Type.Object({
 export const AggregateParams = Type.Object({
 	tasks: Type.Array(StepParams, {
 		minItems: 1,
-		description: "Parallel tasks to run before the aggregator.",
+		description: "Parallel tasks to run before the aggregator. Each name must be unique.",
 	}),
 	aggregator: Type.Object({
 		name: Type.String({ description: "Aggregator team member name (matches YAML 'name' field)." }),
 		task: Type.String({
 			description:
-				"Aggregator task. Use '{previous}' anywhere to receive the joined prior outputs (one block per task).",
+				"Aggregator task. Use '{previous}' anywhere to receive the joined prior outputs (one block per task). Write '{{previous}}' (doubled braces) to embed the literal token without substitution.",
 		}),
 	}),
 	timeoutMs: Type.Optional(
@@ -65,7 +76,7 @@ export const ChainParams = Type.Object({
 	steps: Type.Array(StepParams, {
 		minItems: 1,
 		description:
-			"Sequential steps. Each step's '{previous}' is replaced with the prior step's output (empty for the first step).",
+			"Sequential steps. Each step's '{previous}' is replaced with the prior step's output (empty for the first step). Write '{{previous}}' (doubled braces) to embed the literal token without substitution.",
 	}),
 	timeoutMs: Type.Optional(
 		Type.Number({
@@ -91,14 +102,56 @@ type SpawnFn = (
 
 type StepResult = Readonly<{ name: string; output: string }>;
 
+/**
+ * Substitutes `{previous}` with the prior step's output. Doubled braces
+ * (`{{previous}}`) escape the placeholder and resolve to the literal
+ * token `{previous}`, so users can discuss the syntax in their prompts
+ * without it being clobbered. Order of operations matters: escape first,
+ * substitute, then restore the literal.
+ */
+const PREVIOUS_PLACEHOLDER = "{previous}";
+const PREVIOUS_ESCAPE = "{{previous}}";
+const PREVIOUS_SENTINEL = "\u0000PREVIOUS_LITERAL\u0000";
+
+const substitutePrevious = (template: string, previous: string): string =>
+	template
+		.replaceAll(PREVIOUS_ESCAPE, PREVIOUS_SENTINEL)
+		.replaceAll(PREVIOUS_PLACEHOLDER, previous)
+		.replaceAll(PREVIOUS_SENTINEL, PREVIOUS_PLACEHOLDER);
+
 const formatPriorOutputs = (results: readonly StepResult[]): string =>
 	results.map((result) => `=== ${result.name} ===\n${result.output}`).join("\n\n");
 
-export type AggregateResult = Readonly<{
-	output: string;
-	tasks: readonly StepResult[];
-	aggregatorRun: AgentRun;
-}>;
+/**
+ * Failure descriptor for a partial aggregate result.
+ * - `task` — one of the parallel tasks failed (with its index, name, and reason).
+ * - `aggregator` — all parallel tasks completed but the aggregator itself failed.
+ */
+export type AggregateFailure =
+	| { readonly kind: "task"; readonly index: number; readonly name: string; readonly reason: string }
+	| { readonly kind: "aggregator"; readonly name: string; readonly reason: string };
+
+/**
+ * Result of `runAggregate`.
+ * - `done` — all parallel tasks completed AND the aggregator completed.
+ * - `partial` — at least one parallel task or the aggregator failed;
+ *   `tasks` contains whatever completed, `failure` describes what stopped the run.
+ *
+ * Configuration errors (unknown agent, empty task, duplicate name) still throw —
+ * only execution-time failures produce a partial result.
+ */
+export type AggregateResult =
+	| {
+			readonly kind: "done";
+			readonly output: string;
+			readonly tasks: readonly StepResult[];
+			readonly aggregatorRun: AgentRun;
+	  }
+	| {
+			readonly kind: "partial";
+			readonly tasks: readonly StepResult[];
+			readonly failure: AggregateFailure;
+	  };
 
 /**
  * Run a list of tasks in parallel, then run an aggregator with the joined
@@ -112,53 +165,144 @@ export const runAggregate = async (
 	spawn: SpawnFn,
 ): Promise<AggregateResult> => {
 	const team = getTeam();
-	for (const t of params.tasks) {
+
+	// Pre-validation: caller errors throw loudly. We check all tasks up front
+	// (not lazily) so the LLM sees every problem at once, not one round-trip
+	// at a time. Duplicates are caught here so the same-named task can't
+	// trigger a mid-batch "agent already running" rejection from subagent.ts.
+	const seen = new Set<string>();
+	for (let i = 0; i < params.tasks.length; i++) {
+		const t = params.tasks[i]!;
 		if (!team.has(t.name)) {
-			throw new Error(`unknown agent '${t.name}'. available: ${formatAvailableAgents(team)}`);
+			throw new Error(
+				`task ${i}: unknown agent '${t.name}'. available: ${formatAvailableAgents(team)}`,
+			);
+		}
+		if (seen.has(t.name)) {
+			throw new Error(`task ${i}: duplicate name '${t.name}' in tasks[]`);
+		}
+		seen.add(t.name);
+		const member = team.get(t.name)!;
+		const taskText = (t.task ?? member.task).trim();
+		if (taskText.length === 0) {
+			throw new Error(`no task supplied for '${t.name}' and YAML 'task' is empty`);
 		}
 	}
 	if (!team.has(params.aggregator.name)) {
-		throw new Error(`unknown agent '${params.aggregator.name}'. available: ${formatAvailableAgents(team)}`);
-	}
-
-	const taskResults = await Promise.all(
-		params.tasks.map(async (t): Promise<StepResult> => {
-			const member = team.get(t.name)!;
-			const taskText = (t.task ?? member.task).trim();
-			if (taskText.length === 0) {
-				throw new Error(`no task supplied for '${t.name}' and YAML 'task' is empty`);
-			}
-			const run = await spawn(member, taskText, signal, params.timeoutMs);
-			if (run.state === "error") {
-				throw new Error(`${t.name} failed: ${run.lastError || run.transcript}`);
-			}
-			return { name: t.name, output: run.transcript || "" };
-		}),
-	);
-
-	const aggregatorMember = team.get(params.aggregator.name)!;
-	const aggregatorTask = params.aggregator.task.replaceAll(
-		"{previous}",
-		formatPriorOutputs(taskResults),
-	);
-	const aggregatorRun = await spawn(aggregatorMember, aggregatorTask, signal, params.timeoutMs);
-	if (aggregatorRun.state === "error") {
 		throw new Error(
-			`aggregator '${params.aggregator.name}' failed: ${aggregatorRun.lastError || aggregatorRun.transcript}`,
+			`unknown agent '${params.aggregator.name}'. available: ${formatAvailableAgents(team)}`,
+		);
+	}
+	const aggregatorMember = team.get(params.aggregator.name)!;
+	const aggregatorTemplate = params.aggregator.task.trim();
+	if (aggregatorTemplate.length === 0) {
+		throw new Error(
+			`no task supplied for '${params.aggregator.name}' and YAML 'task' is empty`,
 		);
 	}
 
+	// Run all parallel tasks. Promise.allSettled keeps the in-flight
+	// subprocesses running after a throw, so we can recover their outputs
+	// into the partial result.
+	const settled = await Promise.allSettled(
+		params.tasks.map(
+			async (t): Promise<StepResult> => {
+				const member = team.get(t.name)!;
+				const taskText = (t.task ?? member.task).trim();
+				const run = await spawn(member, taskText, signal, params.timeoutMs);
+				if (run.state === "error") {
+					throw new Error(`${t.name} failed: ${run.lastError || run.transcript}`);
+				}
+				return { name: t.name, output: run.transcript || "" };
+			},
+		),
+	);
+
+	const tasks: StepResult[] = [];
+	let firstFailure: { index: number; name: string; reason: string } | null = null;
+	for (let i = 0; i < settled.length; i++) {
+		const r = settled[i]!;
+		if (r.status === "fulfilled") {
+			tasks.push(r.value);
+		} else if (firstFailure === null) {
+			firstFailure = {
+				index: i,
+				name: params.tasks[i]!.name,
+				reason: getErrorMessage(r.reason),
+			};
+		}
+	}
+
+	if (firstFailure !== null) {
+		return {
+			kind: "partial",
+			tasks,
+			failure: { kind: "task", ...firstFailure },
+		};
+	}
+
+	// All parallel tasks completed. Substitute {previous} in the aggregator task
+	// and run it. A post-substitution empty task is a partial result (the user
+	// gets the completed tasks back, with a clear reason for the stop).
+	const aggregatorTask = substitutePrevious(aggregatorTemplate, formatPriorOutputs(tasks)).trim();
+	if (aggregatorTask.length === 0) {
+		return {
+			kind: "partial",
+			tasks,
+			failure: {
+				kind: "aggregator",
+				name: params.aggregator.name,
+				reason: "aggregator task resolved to empty/whitespace after {previous} substitution",
+			},
+		};
+	}
+
+	const aggregatorRun = await spawn(aggregatorMember, aggregatorTask, signal, params.timeoutMs);
+	if (aggregatorRun.state === "error") {
+		return {
+			kind: "partial",
+			tasks,
+			failure: {
+				kind: "aggregator",
+				name: params.aggregator.name,
+				reason: `${params.aggregator.name} failed: ${aggregatorRun.lastError || aggregatorRun.transcript}`,
+			},
+		};
+	}
+
 	return {
+		kind: "done",
 		output: aggregatorRun.transcript || "(no output)",
-		tasks: taskResults,
+		tasks,
 		aggregatorRun,
 	};
 };
 
-export type ChainResult = Readonly<{
-	output: string;
-	steps: readonly StepResult[];
-}>;
+/**
+ * Result of `runChain`.
+ * - `done` — every step completed; `output` is the last step's transcript.
+ * - `partial` — a step failed mid-chain; `steps` contains whatever completed,
+ *   `failure` points at the failing step.
+ *
+ * Configuration errors (unknown agent, empty task) still throw.
+ */
+export type ChainFailure = {
+	readonly index: number;
+	readonly name: string;
+	readonly reason: string;
+};
+
+export type ChainResult =
+	| {
+			readonly kind: "done";
+			readonly output: string;
+			readonly steps: readonly StepResult[];
+	  }
+	| {
+			readonly kind: "partial";
+			readonly steps: readonly StepResult[];
+			readonly failure: ChainFailure;
+	  };
 
 /**
  * Run a list of steps sequentially. Each step's task has all occurrences of
@@ -171,7 +315,7 @@ export const runChain = async (
 	spawn: SpawnFn,
 ): Promise<ChainResult> => {
 	const team = getTeam();
-	const stepResults: StepResult[] = [];
+	const steps: StepResult[] = [];
 	let previous = "";
 
 	for (let i = 0; i < params.steps.length; i++) {
@@ -182,27 +326,51 @@ export const runChain = async (
 			);
 		}
 		const member = team.get(step.name)!;
-		const taskText = (step.task ?? member.task).replaceAll("{previous}", previous);
+		const taskText = substitutePrevious(step.task ?? member.task, previous).trim();
+		if (taskText.length === 0) {
+			throw new Error(`no task supplied for '${step.name}' and YAML 'task' is empty`);
+		}
 		const run = await spawn(member, taskText, signal, params.timeoutMs);
 		if (run.state === "error") {
-			throw new Error(`step ${i} ('${step.name}') failed: ${run.lastError || run.transcript}`);
+			return {
+				kind: "partial",
+				steps,
+				failure: {
+					index: i,
+					name: step.name,
+					reason: `${step.name} failed: ${run.lastError || run.transcript}`,
+				},
+			};
 		}
 		const output = run.transcript || "";
-		stepResults.push({ name: step.name, output });
+		steps.push({ name: step.name, output });
 		previous = output;
 	}
 
-	const last = stepResults[stepResults.length - 1];
+	const last = steps[steps.length - 1];
 	return {
+		kind: "done",
 		output: last?.output || "(no output)",
-		steps: stepResults,
+		steps,
 	};
 };
 
 const asTextContent = (text: string) => ({ type: "text" as const, text });
 
-const formatAvailableAgents = (team: ReadonlyMap<string, TeamMember>): string =>
-	[...team.keys()].join(", ") || "(no team members loaded)";
+/**
+ * Cap the "available:" tail in unknown-agent errors so a 100-member roster
+ * doesn't bloat LLM context on every typo. The first 10 names are shown
+ * verbatim; the remainder are summarized. The LLM can call
+ * `nano_agent_status` to see the full list.
+ */
+const MAX_AVAILABLE_AGENTS_IN_ERROR = 10;
+
+const formatAvailableAgents = (team: ReadonlyMap<string, TeamMember>): string => {
+	const names = [...team.keys()];
+	if (names.length === 0) return "(no team members loaded)";
+	if (names.length <= MAX_AVAILABLE_AGENTS_IN_ERROR) return names.join(", ");
+	return `${names.slice(0, MAX_AVAILABLE_AGENTS_IN_ERROR).join(", ")}, ... and ${names.length - MAX_AVAILABLE_AGENTS_IN_ERROR} more`;
+};
 
 const formatDuration = (millis: number): string => {
 	if (millis < 1000) return `${millis}ms`;
@@ -266,6 +434,51 @@ const renderSingleAgentStatus = (run: AgentRun, member: TeamMember | undefined):
 	return lines.join("\n");
 };
 
+/**
+ * Format a partial aggregate result for the LLM. Includes the completed
+ * tasks' outputs (same format as `{previous}` substitution) so the LLM
+ * can pick up where the run stopped.
+ */
+const formatAggregatePartial = (
+	result: Extract<AggregateResult, { kind: "partial" }>,
+	total: number,
+): string => {
+	const completed = result.tasks.length;
+	const failureLine =
+		result.failure.kind === "task"
+			? `task ${result.failure.index} ('${result.failure.name}') failed: ${result.failure.reason}`
+			: `aggregator ('${result.failure.name}') failed: ${result.failure.reason}`;
+	return [
+		`Partial aggregate: ${completed} of ${total} task${total === 1 ? "" : "s"} completed before failure.`,
+		"",
+		completed > 0 ? "Completed tasks:" : "(no tasks completed)",
+		completed > 0 ? formatPriorOutputs(result.tasks) : "",
+		"",
+		`Failure: ${failureLine}`,
+	]
+		.filter((line) => line !== "")
+		.join("\n");
+};
+
+/**
+ * Format a partial chain result for the LLM. Includes the completed
+ * steps' outputs (same format as `{previous}` substitution) so the LLM
+ * can pick up where the chain stopped.
+ */
+const formatChainPartial = (result: Extract<ChainResult, { kind: "partial" }>, total: number): string => {
+	const completed = result.steps.length;
+	return [
+		`Partial chain: ${completed} of ${total} step${total === 1 ? "" : "s"} completed before failure.`,
+		"",
+		completed > 0 ? "Completed steps:" : "(no steps completed)",
+		completed > 0 ? formatPriorOutputs(result.steps) : "",
+		"",
+		`Failure: step ${result.failure.index} ('${result.failure.name}') failed: ${result.failure.reason}`,
+	]
+		.filter((line) => line !== "")
+		.join("\n");
+};
+
 type StatusDetails = Readonly<{
 	team: readonly TeamMember[];
 	runs: readonly AgentRun[];
@@ -298,7 +511,8 @@ export const registerTools = (
 			if (!task) {
 				throw new Error(`no task supplied for '${params.name}' and YAML 'task' is empty`);
 			}
-			const run = await subagent.spawn(member, task, signal, params.timeoutMs);
+			const timeoutMs = params.timeoutMs ?? DEFAULT_SPAWN_TIMEOUT_MS;
+			const run = await subagent.spawn(member, task, signal, timeoutMs);
 			if (run.state === "error") {
 				throw new Error(run.lastError || run.transcript || `agent '${params.name}' failed`);
 			}
@@ -361,15 +575,21 @@ export const registerTools = (
 		name: "nano_agent_aggregate",
 		label: "Aggregate nano-team agents",
 		description:
-			"Run multiple subagents in parallel, then run an aggregator with the joined prior outputs substituted as {previous}. Composes nano_agent_spawn.",
+			"Run multiple subagents in parallel, then run an aggregator with the joined prior outputs substituted as {previous}. If any task or the aggregator fails, the result is partial: completed tasks are returned alongside a failure description. Composes nano_agent_spawn.",
 		promptSnippet:
 			"`nano_agent_aggregate(tasks, aggregator, timeoutMs?)` — run N agents in parallel, then aggregate.",
 		parameters: AggregateParams,
 		async execute(_toolCallId, params: AggregateArgs, signal) {
 			const result = await runAggregate(params, signal, getTeam, spawn);
+			if (result.kind === "done") {
+				return {
+					content: [asTextContent(result.output)],
+					details: { kind: "done", tasks: result.tasks, aggregatorRun: result.aggregatorRun },
+				};
+			}
 			return {
-				content: [asTextContent(result.output)],
-				details: { tasks: result.tasks, aggregator: result.aggregatorRun },
+				content: [asTextContent(formatAggregatePartial(result, params.tasks.length))],
+				details: { kind: "partial", tasks: result.tasks, failure: result.failure },
 			};
 		},
 	});
@@ -378,15 +598,21 @@ export const registerTools = (
 		name: "nano_agent_chain",
 		label: "Chain nano-team agents",
 		description:
-			"Run subagents sequentially. Each step's {previous} is replaced with the prior step's output. The final step's output is returned.",
+			"Run subagents sequentially. Each step's {previous} is replaced with the prior step's output. The final step's output is returned. If a step fails, the result is partial: completed steps are returned alongside a failure description.",
 		promptSnippet:
 			"`nano_agent_chain(steps, timeoutMs?)` — run agents sequentially, chaining outputs via {previous}.",
 		parameters: ChainParams,
 		async execute(_toolCallId, params: ChainArgs, signal) {
 			const result = await runChain(params, signal, getTeam, spawn);
+			if (result.kind === "done") {
+				return {
+					content: [asTextContent(result.output)],
+					details: { kind: "done", steps: result.steps },
+				};
+			}
 			return {
-				content: [asTextContent(result.output)],
-				details: { steps: result.steps },
+				content: [asTextContent(formatChainPartial(result, params.steps.length))],
+				details: { kind: "partial", steps: result.steps, failure: result.failure },
 			};
 		},
 	});
