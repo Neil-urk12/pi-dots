@@ -3,6 +3,7 @@ import * as path from "node:path";
 import { type AgentRun, type AgentState, createInitialRun, LIVE_AGENT_STATES, type TeamMember } from "./types.ts";
 import { applyStreamEvent, createAccumulator, type StreamEvent } from "./stream-parser.ts";
 import { type ProcessFactory, type ProcessHandle, ChildProcessAdapter } from "./process.ts";
+import { getErrorMessage } from "./errors.ts";
 
 export type Subagent = Readonly<{
 	spawn(
@@ -10,10 +11,10 @@ export type Subagent = Readonly<{
 		task: string,
 		signal: AbortSignal | undefined,
 		timeoutMs?: number,
-	): Promise<AgentRun>;
+	): Promise<Readonly<AgentRun>>;
 	kill(name: string): boolean;
-	list(): readonly AgentRun[];
-	get(name: string): AgentRun | undefined;
+	list(): readonly Readonly<AgentRun>[];
+	get(name: string): Readonly<AgentRun> | undefined;
 	subscribe(listener: () => void): () => void;
 	shutdown(): void;
 }>;
@@ -130,6 +131,11 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 		if (member.model !== undefined) {
 			baseArgs.push("--model", member.model);
 		}
+		// The user-supplied task is the actual prompt for the subprocess.
+		// Without it, pi in -p mode has nothing to process and exits
+		// immediately. The system prompt is passed separately via
+		// --append-system-prompt by the adapter (see ChildProcessAdapter).
+		baseArgs.push(`Task: ${task}`);
 
 		let handle: ProcessHandle;
 		try {
@@ -138,13 +144,18 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 			updateRun(member.name, {
 				state: "error",
 				endedAt: now(),
-				lastError: (error as Error).message,
+				lastError: getErrorMessage(error),
 			});
 			throw error;
 		}
 
 		handles.set(member.name, handle);
 		updateRun(member.name, { pid: handle.pid ?? null });
+
+		// Declared at the function scope (NOT inside the inner try) so the
+		// `finally` block can always clear it, even if an earlier statement
+		// in the try throws before the timer is scheduled.
+		let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
 		try {
 			// Local mirror of the run's state. Kept in sync via updateRun()
@@ -157,7 +168,6 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 			let pendingLine = "";
 			let resolved = false;
 			let timeoutFired = false;
-			let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
 			if (timeoutMs !== undefined && timeoutMs > 0) {
 				timeoutHandle = setTimeout(() => {
 					timeoutFired = true;
@@ -255,7 +265,28 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 				lastError: finalState.lastError,
 				pid: null,
 			});
+		} catch (error) {
+			// Defensive: if the body throws before reaching the final updateRun
+			// (e.g. a synchronous throw from updateRun itself, a bad chunk
+			// decoder, or an exception in the stream-parser path), transition
+			// the run to error explicitly so it doesn't stay stuck in
+			// 'thinking' forever — a real failure mode the lyra / orion
+			// reviews surfaced.
+			updateRun(member.name, {
+				state: "error",
+				endedAt: now(),
+				activity: null,
+				lastError: getErrorMessage(error),
+				pid: null,
+			});
+			throw error;
 		} finally {
+			// Always clear the SIGKILL grace timer — without this it would
+			// fire after a clean exit and call kill() on a dead handle.
+			if (timeoutHandle) {
+				clearTimeout(timeoutHandle);
+				timeoutHandle = null;
+			}
 			handles.delete(member.name);
 		}
 

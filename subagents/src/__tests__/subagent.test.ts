@@ -21,7 +21,19 @@ type SpawnCall = {
 	cwd: string;
 };
 
-const createFakeFactory = (): { factory: ProcessFactory; calls: SpawnCall[]; handles: FakeHandle[] } => {
+type FakeFactoryOptions = {
+	/**
+	 * If true, the handle's on("close", ...) call throws synchronously.
+	 * The body registers the "error" listener first and the "close"
+	 * listener second, so this is a clean way to inject a mid-body
+	 * throw that the long-lived try/catch must handle.
+	 */
+	onCloseThrows?: boolean;
+};
+
+const createFakeFactory = (
+	options: FakeFactoryOptions = {},
+): { factory: ProcessFactory; calls: SpawnCall[]; handles: FakeHandle[] } => {
 	const calls: SpawnCall[] = [];
 	const handles: FakeHandle[] = [];
 
@@ -40,6 +52,9 @@ const createFakeFactory = (): { factory: ProcessFactory; calls: SpawnCall[]; han
 				stderr,
 				pid: 1000 + handles.length,
 				on(event: "close" | "error", listener: ((code: number | null) => void) | ((error: Error) => void)) {
+					if (event === "close" && options.onCloseThrows) {
+						throw new Error("synthetic close registration error");
+					}
 					if (event === "close") closeListeners.push(listener as (code: number | null) => void);
 					else errorListeners.push(listener as (error: Error) => void);
 				},
@@ -190,6 +205,65 @@ describe("Subagent lifecycle", () => {
 
 		handles[0]!.emitClose(0);
 		await first;
+	});
+
+	test("synchronous throw during stream setup transitions the run to error (not stuck in 'thinking')", async () => {
+		// Regression: the long-lived try/finally inside spawnAgent had no catch
+		// clause, so any sync throw during stream setup would skip the final
+		// updateRun({ state: "done" | "error" }) and leave the run stuck in
+		// "thinking" forever. The fix adds a catch that transitions to error
+		// before re-throwing.
+		const m = member();
+		const { factory } = createFakeFactory({ onCloseThrows: true });
+		const subagent = createSubagent("/test", { factory });
+
+		await expect(subagent.spawn(m, "task", undefined)).rejects.toThrow(
+			"synthetic close registration error",
+		);
+
+		const run = subagent.get(m.name);
+		expect(run?.state).toBe("error");
+		expect(run?.lastError).toBe("synthetic close registration error");
+		expect(run?.endedAt).not.toBeNull();
+	});
+
+	test("captures non-Error throws in factory.start catch (no `as Error` cast)", async () => {
+		// Regression: the previous `(error as Error).message` cast at
+		// the catch boundary assumed every thrown value was an Error. A
+		// string throw made `(string as Error).message` return
+		// `undefined` and the user saw `lastError: undefined`. The fix
+		// uses getErrorMessage(error) which handles any thrown value.
+		const factory: ProcessFactory = {
+			async start() {
+				throw "string-error-not-an-error-instance";
+			},
+		};
+		const subagent = createSubagent("/test", { factory });
+		const m = member();
+		await expect(subagent.spawn(m, "task", undefined)).rejects.toBe(
+			"string-error-not-an-error-instance",
+		);
+		const run = subagent.get(m.name);
+		expect(run?.state).toBe("error");
+		// Old code produced lastError = "undefined" (string).
+		// New code produces the actual thrown value.
+		expect(run?.lastError).toBe("string-error-not-an-error-instance");
+	});
+
+	test("Subagent.get returns Readonly<AgentRun> (caller mutations blocked at the type level)", () => {
+		// Regression: the previous Subagent.get returned a mutable
+		// AgentRun, allowing callers to corrupt internal state until
+		// the next updateRun(). The type is now Readonly<AgentRun>;
+		// the @ts-expect-error below would fail (Unused ts-expect-error)
+		// if a future refactor reverts to a mutable return type.
+		const { factory } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+		const run = subagent.get("nonexistent");
+		if (run) {
+			// @ts-expect-error — Readonly<AgentRun>.state is readonly
+			run.state = "hacked";
+		}
+		expect(run).toBeUndefined();
 	});
 
 	test("kill returns true when agent is running", async () => {

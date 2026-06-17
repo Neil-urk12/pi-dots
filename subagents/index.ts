@@ -8,6 +8,7 @@ import {
 	FALLBACK_TERMINAL_COLS,
 	type WidgetFlusher,
 	type WidgetSink,
+	WIDGET_PLACEMENT,
 } from "./src/flusher.ts";
 import { LIVE_AGENT_STATES, type TeamMember } from "./src/types.ts";
 
