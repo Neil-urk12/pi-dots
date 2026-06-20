@@ -16,7 +16,7 @@
     "resolveJsonModule": true,
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
-    "types": ["node", "bun"]
+    "types": ["node"]
   },
   "include": ["index.ts", "src/**/*.ts"]
   ,
