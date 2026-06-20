@@ -6,6 +6,12 @@ export type TeamMember = Readonly<{
 	instructions: string;
 	task: string;
 	model?: string;
+	description?: string;
+	/**
+	 * When true, multiple live instances of this agent may run concurrently.
+	 * Defaults to false; opt-in only via the agent's YAML/markdown source.
+	 */
+	readOnly?: boolean;
 	sourceFile: string;
 }>;
 
@@ -15,6 +21,12 @@ export type TeamMember = Readonly<{
 // wrapper was a compile-time lie that hid this replacement pattern.
 export type AgentRun = {
 	name: string;
+	/**
+	 * Stable, human-readable identifier of the form `${name}-${n}` where `n`
+	 * is a per-name monotonic counter. Unique across all concurrent runs of
+	 * the same agent name. Scoped to the Subagent's lifetime.
+	 */
+	instanceId: string;
 	state: AgentState;
 	task: string;
 	startedAt: number;
@@ -36,8 +48,9 @@ export const LIVE_AGENT_STATES: ReadonlySet<AgentState> = new Set(["thinking", "
 export const isLiveState = (state: AgentState): state is "thinking" | "working" =>
 	LIVE_AGENT_STATES.has(state);
 
-export const createInitialRun = (name: string, task = ""): AgentRun => ({
+export const createInitialRun = (name: string, instanceId: string, task = ""): AgentRun => ({
 	name,
+	instanceId,
 	state: "idle",
 	task,
 	startedAt: 0,

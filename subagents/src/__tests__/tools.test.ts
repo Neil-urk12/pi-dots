@@ -21,8 +21,14 @@ const makeMember = (name: string, task = "default task"): TeamMember =>
 		sourceFile: `${name}.yaml`,
 	});
 
-const makeRun = (state: AgentState, transcript: string, lastError: string | null = null): AgentRun => ({
-	name: "test",
+
+
+let mockInstanceCounter = 0;
+const nextMockInstanceId = (name: string): string => `${name}-mock-${++mockInstanceCounter}`;
+
+const makeRun = (state: AgentState, transcript: string, lastError: string | null = null, name = "test"): AgentRun => ({
+	name,
+	instanceId: nextMockInstanceId(name),
 	state,
 	task: "",
 	startedAt: 1000,
@@ -91,8 +97,8 @@ describe("runAggregate", () => {
 		expect(calls[2]!.memberName).toBe("aggregator");
 
 		// The aggregator's task has {previous} replaced with the joined prior outputs.
-		expect(calls[2]!.task).toBe(
-			"Combine:\n=== scout ===\nfound A\n\n=== worker ===\nbuilt B",
+		expect(calls[2]!.task).toMatch(
+			/^Combine:\n=== scout \(test-mock-\d+\) ===\nfound A\n\n=== worker \(test-mock-\d+\) ===\nbuilt B$/,
 		);
 
 		expect(result.output).toBe("summary");
@@ -120,7 +126,7 @@ describe("runAggregate", () => {
 			spawn,
 		);
 
-		expect(calls[1]!.task).toBe("=== a ===\nx and === a ===\nx");
+		expect(calls[1]!.task).toMatch(/^=== a \(test-mock-\d+\) ===\nx and === a \(test-mock-\d+\) ===\nx$/);
 	});
 
 	test("throws when a task name is unknown", async () => {
@@ -192,7 +198,7 @@ describe("runAggregate", () => {
 		if (result.failure.kind !== "task") throw new Error("unreachable");
 		expect(result.failure.index).toBe(0);
 		expect(result.failure.name).toBe("scout");
-		expect(result.failure.reason).toBe("scout failed: boom");
+		expect(result.failure.reason).toMatch(/^scout \(test-mock-\d+\) failed: boom$/);
 
 		// The completed task is preserved — the worker's output is not lost.
 		expect(result.tasks).toHaveLength(1);
@@ -235,7 +241,7 @@ describe("runAggregate", () => {
 		if (result.failure.kind !== "task") throw new Error("unreachable");
 		expect(result.failure.index).toBe(0);
 		expect(result.failure.name).toBe("scout");
-		expect(result.failure.reason).toBe("scout failed: boom1");
+		expect(result.failure.reason).toMatch(/^scout \(test-mock-\d+\) failed: boom1$/);
 
 		// The aggregator is NOT spawned.
 		expect(calls).toHaveLength(2);
@@ -333,7 +339,7 @@ describe("runAggregate", () => {
 		expect(result.failure.kind).toBe("aggregator");
 		if (result.failure.kind !== "aggregator") throw new Error("unreachable");
 		expect(result.failure.name).toBe("aggregator");
-		expect(result.failure.reason).toBe("aggregator failed: nope");
+		expect(result.failure.reason).toMatch(/^aggregator failed: nope$/);
 
 		// The completed parallel task is preserved.
 		expect(result.tasks).toHaveLength(1);
@@ -440,8 +446,8 @@ describe("runAggregate", () => {
 		expect(calls).toHaveLength(3);
 		// {previous} is replaced with the joined prior outputs; {{previous}}
 		// is restored to the literal token.
-		expect(calls[2]!.task).toBe(
-			"summarize === scout ===\nx\n\n=== worker ===\ny and also explain the {previous} syntax",
+		expect(calls[2]!.task).toMatch(
+			/^summarize === scout \(test-mock-\d+\) ===\nx\n\n=== worker \(test-mock-\d+\) ===\ny and also explain the \{previous\} syntax$/,
 		);
 	});
 
@@ -622,7 +628,7 @@ describe("runChain", () => {
 		// The failure points at the planner step.
 		expect(result.failure.index).toBe(1);
 		expect(result.failure.name).toBe("planner");
-		expect(result.failure.reason).toBe("planner failed: nope");
+		expect(result.failure.reason).toMatch(/^planner \(test-mock-\d+\) failed: nope$/);
 
 		// The completed scout step is preserved.
 		expect(result.steps).toHaveLength(1);
@@ -835,20 +841,20 @@ describe("registerTools", () => {
 
 		expect(result.details).toEqual({
 			kind: "partial",
-			tasks: [{ name: "worker", output: "ok" }],
+			tasks: [{ name: "worker", output: "ok", instanceId: expect.stringMatching(/test-mock-\d+/) }],
 			failure: {
 				kind: "task",
 				index: 0,
 				name: "scout",
-				reason: "scout failed: boom",
+				reason: expect.stringMatching(/^scout \(test-mock-\d+\) failed: boom$/),
 			},
 		});
 
 		const text = result.content[0]!.text;
 		expect(text).toContain("Partial aggregate: 1 of 2 tasks completed before failure.");
-		expect(text).toContain("=== worker ===");
+		expect(text).toMatch(/=== worker \(test-mock-\d+\) ===/);
 		expect(text).toContain("ok");
-		expect(text).toContain("Failure: task 0 ('scout') failed: scout failed: boom");
+		expect(text).toMatch(/Failure: task 0 \('scout'\) failed: scout \(test-mock-\d+\) failed: boom/);
 	});
 
 	test("nano_agent_aggregate execute() returns partial with failure.kind='aggregator' when the aggregator fails", async () => {
@@ -880,13 +886,13 @@ describe("registerTools", () => {
 		).failure;
 		expect(failure.kind).toBe("aggregator");
 		expect(failure.name).toBe("aggregator");
-		expect(failure.reason).toBe("aggregator failed: nope");
+		expect(failure.reason).toMatch(/^aggregator failed: nope$/);
 		expect(failure).not.toHaveProperty("index");
 
 		// The completed scout output is preserved in the structured details.
 		expect(
 			(result.details as { tasks: readonly { name: string; output: string }[] }).tasks,
-		).toEqual([{ name: "scout", output: "x" }]);
+		).toEqual([{ name: "scout", output: "x", instanceId: expect.stringMatching(/test-mock-\d+/) }]);
 	});
 
 	test("nano_agent_aggregate execute() handles 'all tasks failed' partial (0 of N completed)", async () => {
@@ -921,7 +927,7 @@ describe("registerTools", () => {
 		const text = result.content[0]!.text;
 		expect(text).toContain("Partial aggregate: 0 of 2 tasks completed before failure.");
 		expect(text).toContain("(no tasks completed)");
-		expect(text).toContain("Failure: task 0 ('scout') failed: scout failed: boom1");
+		expect(text).toMatch(/Failure: task 0 \('scout'\) failed: scout \(test-mock-\d+\) failed: boom1/);
 	});
 
 	test("nano_agent_chain execute() returns done content+details on success", async () => {
@@ -954,8 +960,8 @@ describe("registerTools", () => {
 		expect(result.details).toEqual({
 			kind: "done",
 			steps: [
-				{ name: "a", output: "x" },
-				{ name: "b", output: "y" },
+				{ name: "a", output: "x", instanceId: expect.stringMatching(/test-mock-\d+/) },
+				{ name: "b", output: "y", instanceId: expect.stringMatching(/test-mock-\d+/) },
 			],
 		});
 	});
@@ -990,18 +996,18 @@ describe("registerTools", () => {
 
 		expect(result.details).toEqual({
 			kind: "partial",
-			steps: [{ name: "a", output: "x" }],
+			steps: [{ name: "a", output: "x", instanceId: expect.stringMatching(/test-mock-\d+/) }],
 			failure: {
 				index: 1,
 				name: "b",
-				reason: "b failed: nope",
+				reason: expect.stringMatching(/^b \(test-mock-\d+\) failed: nope$/),
 			},
 		});
 
 		const text = result.content[0]!.text;
 		expect(text).toContain("Partial chain: 1 of 2 steps completed before failure.");
-		expect(text).toContain("=== a ===");
+		expect(text).toMatch(/=== a \(test-mock-\d+\) ===/);
 		expect(text).toContain("x");
-		expect(text).toContain("Failure: step 1 ('b') failed: b failed: nope");
+		expect(text).toMatch(/Failure: step 1 \('b'\) failed: b \(test-mock-\d+\) failed: nope/);
 	});
 });

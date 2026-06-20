@@ -1,5 +1,6 @@
 name: lyra
 role: reviewer
+readOnly: true
 # model: openrouter/inception/mercury-2  # commented out: inherit pi's default model. Uncomment to pin.
 instructions: |
   You review TypeScript against this project's standards. Flag, in order of severity:

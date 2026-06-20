@@ -1,5 +1,5 @@
 import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
-import type { AgentRun, AgentState, TeamMember } from "./types.ts";
+import { isLiveState, type AgentRun, type AgentState, type TeamMember } from "./types.ts";
 
 export const AGENT_PALETTE: readonly string[] = [
 	"#e06363", "#7ad9d9", "#f0a060", "#80b8e0", "#f0c060", "#7a9aff",
@@ -113,19 +113,21 @@ const agentColorCache = new Map<string, string>();
 // Hash-only assignment hits ~59% birthday-collision odds for 4 names in a 12-color palette and
 // ~91% for 4 variants per state. Linear-probe over the visible group keeps the rendered row
 // distinct; resetting `taken` once the pool is exhausted balances larger groups (8 agents → 2 each).
+// Color is keyed by `agentName` (not `instanceId`) so concurrent runs of the same agent
+// share one color — visual identity is by role, not by individual run.
 const assignAgentColor = (inputs: readonly ChipInputBase[]): ReadonlyMap<string, string> => {
 	const numColors = AGENT_PALETTE.length;
 	const resolved = new Map<string, string>();
 	const inUse = new Set<string>();
 	for (const input of inputs) {
-		const cached = agentColorCache.get(input.name);
+		const cached = agentColorCache.get(input.agentName);
 		if (cached === undefined) continue;
-		resolved.set(input.name, cached);
+		resolved.set(input.agentName, cached);
 		inUse.add(cached);
 	}
 	for (const input of inputs) {
-		if (resolved.has(input.name)) continue;
-		let chosen = hashString(`${input.name}:${COLOR_SESSION_KEY}`) % numColors;
+		if (resolved.has(input.agentName)) continue;
+		let chosen = hashString(`${input.agentName}:${COLOR_SESSION_KEY}`) % numColors;
 		for (let probe = 0; probe < numColors; probe++) {
 			const candidate = AGENT_PALETTE[chosen] ?? FALLBACK_COLOR;
 			if (!inUse.has(candidate)) break;
@@ -133,12 +135,17 @@ const assignAgentColor = (inputs: readonly ChipInputBase[]): ReadonlyMap<string,
 		}
 		const color = AGENT_PALETTE[chosen] ?? FALLBACK_COLOR;
 		inUse.add(color);
-		agentColorCache.set(input.name, color);
-		resolved.set(input.name, color);
+		agentColorCache.set(input.agentName, color);
+		resolved.set(input.agentName, color);
 	}
 	return resolved;
 };
 
+/**
+ * Variant index is keyed by `instanceId` (not agent name) so two concurrent
+ * live runs of the same agent get distinct faces. The color stays shared
+ * by agentName; the variant (face frame selection seed) varies by id.
+ */
 const assignVariantIndex = (inputs: readonly ChipInputBase[]): ReadonlyMap<string, number> => {
 	const byState = new Map<AgentState, ChipInputBase[]>();
 	for (const input of inputs) {
@@ -150,23 +157,23 @@ const assignVariantIndex = (inputs: readonly ChipInputBase[]): ReadonlyMap<strin
 	for (const [state, group] of byState) {
 		const numVariants = FACES_BY_STATE[state].length;
 		const taken = new Set<number>();
-		for (const agent of group) {
+		for (const input of group) {
 			if (taken.size >= numVariants) taken.clear();
-			let chosen = hashString(`${agent.name}:${state}`) % numVariants;
+			let chosen = hashString(`${input.instanceId}:${state}`) % numVariants;
 			for (let probe = 0; probe < numVariants && taken.has(chosen); probe++) {
 				chosen = (chosen + 1) % numVariants;
 			}
 			taken.add(chosen);
-			assignments.set(agent.name, chosen);
+			assignments.set(input.instanceId, chosen);
 		}
 	}
 	return assignments;
 };
 
-const selectFrame = (name: string, state: AgentState, variantIndex: number, frameIndex: number): FaceFrame => {
+const selectFrame = (seed: string, state: AgentState, variantIndex: number, frameIndex: number): FaceFrame => {
 	const variants = FACES_BY_STATE[state];
 	const variant = variants[variantIndex % variants.length]!;
-	const slot = (frameIndex + (hashString(name) % variant.length)) % variant.length;
+	const slot = (frameIndex + (hashString(seed) % variant.length)) % variant.length;
 	return variant[slot]!;
 };
 
@@ -199,8 +206,15 @@ const padToColumns = (text: string, columns: number): string => {
 	return length >= columns ? text : text + " ".repeat(columns - length);
 };
 
+/**
+ * Per-chip input. `name` is the visible label (the `instanceId`, e.g.
+ * `blitz-1`); `agentName` is the underlying agent (`blitz`) and is used
+ * for color assignment; `instanceId` is used for variant assignment.
+ */
 type ChipInput = Readonly<{
 	name: string;
+	agentName: string;
+	instanceId: string;
 	role: string;
 	state: AgentState;
 	activity: string | null;
@@ -219,7 +233,7 @@ type ChipFrame = Readonly<{
 type BorderStyling = Readonly<{ wrapLeft: string; wrapRight: string }>;
 
 const buildChipFrame = (input: ChipInput, frameIndex: number, theme: Theme, border: BorderStyling): ChipFrame => {
-	const [eyesRow, mouthRow] = selectFrame(input.name, input.state, input.variantIndex, frameIndex);
+	const [eyesRow, mouthRow] = selectFrame(input.instanceId, input.state, input.variantIndex, frameIndex);
 	const statusSuffix = ` (${input.state})`;
 	const statusSuffixWidth = Array.from(statusSuffix).length;
 	const labelWidth = Math.max(input.name.length + statusSuffixWidth, input.role.length);
@@ -248,22 +262,52 @@ const buildChipFrame = (input: ChipInput, frameIndex: number, theme: Theme, bord
 	};
 };
 
+/**
+ * Build one chip input per live run. Live = state `thinking` or `working`.
+ * Completed (done/error) runs are excluded from the chips; the caller adds
+ * a per-name completion footer separately.
+ *
+ * Two instances of the same agent produce two chips — that's the whole
+ * point of the instance model. Chip `name` is the `instanceId` (e.g.
+ * `blitz-1`, `blitz-2`); `agentName` carries the underlying agent name
+ * for color keying.
+ */
 const collectChipInputs = (
 	team: ReadonlyMap<string, TeamMember>,
 	runs: readonly AgentRun[],
 ): readonly ChipInputBase[] => {
-	const runByName = new Map(runs.map((run) => [run.name, run]));
 	const ordered: ChipInputBase[] = [];
-	for (const member of team.values()) {
-		const run = runByName.get(member.name);
-		if (!run) continue;
-		ordered.push({ name: member.name, role: member.role, state: run.state, activity: run.activity });
-	}
+	// Track which `instanceId`s we've already emitted so a caller passing
+	// the same run twice doesn't produce duplicate chips.
+	const seen = new Set<string>();
 	for (const run of runs) {
-		if (team.has(run.name)) continue;
-		ordered.push({ name: run.name, role: "?", state: run.state, activity: run.activity });
+		if (seen.has(run.instanceId)) continue;
+		if (!isLiveState(run.state)) continue;
+		seen.add(run.instanceId);
+		const member = team.get(run.name);
+		ordered.push({
+			name: run.instanceId,
+			agentName: run.name,
+			instanceId: run.instanceId,
+			role: member?.role ?? "?",
+			state: run.state,
+			activity: run.activity,
+		});
 	}
 	return ordered;
+};
+
+/**
+ * Count completed runs per agent name. Live runs are excluded — the chip
+ * rendering already covers them.
+ */
+const countCompletedByName = (runs: readonly AgentRun[]): ReadonlyMap<string, number> => {
+	const counts = new Map<string, number>();
+	for (const run of runs) {
+		if (isLiveState(run.state)) continue;
+		counts.set(run.name, (counts.get(run.name) ?? 0) + 1);
+	}
+	return counts;
 };
 
 const partitionIntoRows = (chips: readonly ChipFrame[], maxRowWidth: number): readonly (readonly ChipFrame[])[] => {
@@ -295,8 +339,8 @@ export const renderChips = (
 ): string[] => {
 	const baseInputs = collectChipInputs(team, runs);
 	if (baseInputs.length === 0) return [];
-	const variantByName = assignVariantIndex(baseInputs);
-	const colorByName = assignAgentColor(baseInputs);
+	const variantByInstance = assignVariantIndex(baseInputs);
+	const colorByAgent = assignAgentColor(baseInputs);
 	const innerPad = " ".repeat(BORDER_HORIZONTAL_PAD);
 	const verticalBar = theme.fg("borderMuted", "│");
 	const border: BorderStyling = {
@@ -307,8 +351,8 @@ export const renderChips = (
 		buildChipFrame(
 			{
 				...input,
-				variantIndex: variantByName.get(input.name) ?? 0,
-				faceColor: colorByName.get(input.name) ?? FALLBACK_COLOR,
+				variantIndex: variantByInstance.get(input.instanceId) ?? 0,
+				faceColor: colorByAgent.get(input.agentName) ?? FALLBACK_COLOR,
 			},
 			frameIndex,
 			theme,
@@ -328,5 +372,25 @@ export const renderChips = (
 		);
 		if (rowIndex < rows.length - 1) output.push("");
 	}
+
+	// Append a per-name footer for completed runs. Order matches
+	// team.values() for predictability; legacy names not in the current
+	// team (e.g. a renamed agent) go last.
+	const completed = countCompletedByName(runs);
+	if (completed.size > 0) {
+		const segments: string[] = [];
+		for (const member of team.values()) {
+			const count = completed.get(member.name);
+			if (count === undefined) continue;
+			segments.push(`${member.name}: ${count} completed`);
+		}
+		for (const [name, count] of completed) {
+			if (team.has(name)) continue;
+			segments.push(`${name}: ${count} completed`);
+		}
+		output.push("");
+		output.push(theme.fg("muted", segments.join(" · ")));
+	}
+
 	return output;
 };

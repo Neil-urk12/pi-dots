@@ -88,6 +88,7 @@ export class SpyWidgetSink {
 
 export const makeRun = (name: string, state: AgentState): AgentRun => ({
 	name,
+	instanceId: `${name}-mock`,
 	state,
 	task: "",
 	startedAt: state === "idle" ? 0 : 1000,

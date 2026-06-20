@@ -221,7 +221,7 @@ describe("Subagent lifecycle", () => {
 			"synthetic close registration error",
 		);
 
-		const run = subagent.get(m.name);
+		const run = subagent.getByName(m.name).at(-1);
 		expect(run?.state).toBe("error");
 		expect(run?.lastError).toBe("synthetic close registration error");
 		expect(run?.endedAt).not.toBeNull();
@@ -243,7 +243,7 @@ describe("Subagent lifecycle", () => {
 		await expect(subagent.spawn(m, "task", undefined)).rejects.toBe(
 			"string-error-not-an-error-instance",
 		);
-		const run = subagent.get(m.name);
+		const run = subagent.getByName(m.name).at(-1);
 		expect(run?.state).toBe("error");
 		// Old code produced lastError = "undefined" (string).
 		// New code produces the actual thrown value.
@@ -274,7 +274,9 @@ describe("Subagent lifecycle", () => {
 		await yieldToRunner();
 		const handle = handles[0]!;
 
-		expect(subagent.kill("test-agent")).toBe(true);
+		const instanceId = subagent.getByName("test-agent")[0]?.instanceId;
+		expect(instanceId).toBeDefined();
+		expect(subagent.kill(instanceId!)).toBe(true);
 		expect(handle.killed).toBe(true);
 
 		handle.emitClose(null);
@@ -310,7 +312,9 @@ describe("Subagent lifecycle", () => {
 		const promise = subagent.spawn(member("agent-1"), "task 1", undefined);
 		await yieldToRunner();
 
-		const run = subagent.get("agent-1");
+		const instanceId = subagent.getByName("agent-1")[0]?.instanceId;
+		expect(instanceId).toBeDefined();
+		const run = subagent.get(instanceId!);
 		expect(run).toBeDefined();
 		expect(run!.name).toBe("agent-1");
 		expect(run!.state).toBe("thinking");
@@ -641,5 +645,79 @@ describe("Subagent stream parsing integration", () => {
 
 		const run = await promise;
 		expect(run.state).toBe("done");
+	});
+});
+
+describe("Subagent runs cap", () => {
+	test("evicts oldest terminal-state run when over maxRetainedRuns", async () => {
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory, maxRetainedRuns: 3 });
+
+		// Spawn 5 agents sequentially, closing each before the next.
+		// After all 5 complete, only the 3 most recent should remain —
+		// the oldest two (agent-0, agent-1) are evicted on the next spawn.
+		for (let i = 0; i < 5; i++) {
+			const promise = subagent.spawn(member(`agent-${i}`), `task ${i}`, undefined);
+			await yieldToRunner();
+			handles[i]!.emitClose(0);
+			await promise;
+		}
+
+		const remaining = subagent.list();
+		expect(remaining).toHaveLength(3);
+		const names = remaining.map((r) => r.name);
+		expect(names).toEqual(["agent-2", "agent-3", "agent-4"]);
+	});
+
+	test("does not evict live runs when over maxRetainedRuns", async () => {
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory, maxRetainedRuns: 2 });
+
+		// Spawn 4 agents without closing any. All 4 land in "thinking"
+		// state — eviction is impossible because every entry is live, so
+		// the map grows past the cap.
+		const promises: Array<Promise<unknown>> = [];
+		for (let i = 0; i < 4; i++) {
+			promises.push(subagent.spawn(member(`agent-${i}`), `task ${i}`, undefined));
+		}
+		await yieldToRunner();
+
+		expect(subagent.list()).toHaveLength(4);
+
+		// Clean up: close all handles so the promises resolve.
+		for (const handle of handles) {
+			handle.emitClose(0);
+		}
+		await Promise.all(promises);
+	});
+
+	test("cleans up nameToInstances when evicting", async () => {
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory, maxRetainedRuns: 1 });
+
+		// Spawn two distinct agents sequentially. After both complete,
+		// the oldest (agent-0) is evicted — its instanceId should also
+		// be gone from the name index so a follow-up spawn of the same
+		// agent is accepted (the index no longer thinks it's live).
+		const firstPromise = subagent.spawn(member("agent-0"), "task 0", undefined);
+		await yieldToRunner();
+		handles[0]!.emitClose(0);
+		await firstPromise;
+
+		const secondPromise = subagent.spawn(member("agent-1"), "task 1", undefined);
+		await yieldToRunner();
+		handles[1]!.emitClose(0);
+		await secondPromise;
+
+		// Only agent-1 should remain.
+		const remaining = subagent.list();
+		expect(remaining.map((r) => r.name)).toEqual(["agent-1"]);
+
+		// `getByName("agent-0")` must NOT return the evicted instance.
+		// Without index cleanup, the stale entry would filter out in
+		// `getByName` (because `runs.get(id)` is undefined), but the
+		// index itself would still hold the dangling reference — a
+		// small leak we want to verify is closed.
+		expect(subagent.getByName("agent-0")).toHaveLength(0);
 	});
 });

@@ -21,7 +21,10 @@
     "extensions": [
       "./index.ts"
     ],
-    "image": "https://github.com/neilurk12/pi-nano-agents/blob/main/imgs/example.png?raw=true"
+    "image": "https://github.com/neilurk12/pi-nano-agents/blob/main/imgs/example.png?raw=true",
+    "skills": [
+      "./skills"
+    ]
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

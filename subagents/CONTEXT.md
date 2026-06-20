@@ -27,7 +27,10 @@ A YAML-defined configuration record (`name`, `role`, `model`, `instructions`, `t
 _Avoid_: agent config, agent definition, profile
 
 **Roster**:
-The `Map<string, TeamMember>` produced by loading YAML files from the global (`~/.pi/agent/nano-team/team/`) and local (`.pi/nano-team/team/`) directories. Local overrides global by source-file order; duplicate names are reported as load errors, not silent merges.
+The `Map<string, TeamMember>` produced by loading from three tiers, lowest priority first: built-in `agents/*.md` (shipped with the package), then global `~/.pi/agent/nano-team/team/*.yaml`, then local `<cwd>/.pi/nano-team/team/*.yaml`. Each tier processes its files in source order. Within a single tier, duplicate names are reported as load errors and the first-loaded entry wins. Across tiers, the higher-priority tier silently overrides the lower — so a user-defined `blitz.yaml` shadows the shipped `blitz.md` without erroring.
+
+**Built-in agent**:
+An agent definition shipped inside the `nano-team` package (`agents/*.md`), loaded as the lowest-priority overlay. May be shadowed by a same-name file in the global or local team directories. _Avoid_: default agent, stock agent, builtin.
 
 ### Rendering
 

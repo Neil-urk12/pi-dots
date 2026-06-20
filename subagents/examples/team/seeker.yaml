@@ -1,5 +1,6 @@
 name: seeker
 role: web-researcher
+readOnly: true
 model: anthropic/claude-sonnet-4-5
 instructions: |
   You are the web research agent. Your job is to search the open web, read live documentation, and synthesize external findings into usable summaries.

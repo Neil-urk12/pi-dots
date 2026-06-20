@@ -12,3 +12,17 @@ export const getErrorMessage = (error: unknown): string => {
 	if (error instanceof Error) return error.message;
 	return String(error);
 };
+
+/**
+ * Extract a Node.js errno `code` string (e.g. `"ENOENT"`) from an
+ * unknown thrown value. Requires `instanceof Error` so only genuine
+ * Node.js errors are classified — a plain object `{ code: "ENOENT" }`
+ * is deliberately rejected to avoid masking real causes.
+ */
+export const getErrnoCode = (error: unknown): string | undefined => {
+	if (error instanceof Error && "code" in error) {
+		const code = (error as { code: unknown }).code;
+		return typeof code === "string" ? code : undefined;
+	}
+	return undefined;
+};

@@ -10,7 +10,7 @@ import {
 	type WidgetSink,
 	WIDGET_PLACEMENT,
 } from "./src/flusher.ts";
-import { LIVE_AGENT_STATES, type TeamMember } from "./src/types.ts";
+import { LIVE_AGENT_STATES, type AgentRun, type TeamMember } from "./src/types.ts";
 
 const TASK_SUMMARY_MAX_CHARS = 80;
 
@@ -22,8 +22,10 @@ const summarizeTask = (task: string): string => {
 		: `${firstLine.slice(0, TASK_SUMMARY_MAX_CHARS - 1)}…`;
 };
 
-const formatTeamMember = (member: TeamMember): string =>
-	`- \`${member.name}\` (${member.role}, ${member.model ?? "default"}) — ${summarizeTask(member.task)}`;
+const formatTeamMember = (member: TeamMember): string => {
+	const head = `- \`${member.name}\` (${member.role}, ${member.model ?? "default"}) — ${summarizeTask(member.task)}`;
+	return member.description ? `${head}\n  ${member.description}` : head;
+};
 
 const renderRoster = (team: ReadonlyMap<string, TeamMember>): string =>
 	team.size === 0
@@ -31,12 +33,16 @@ const renderRoster = (team: ReadonlyMap<string, TeamMember>): string =>
 		: Array.from(team.values(), formatTeamMember).join("\n");
 
 const STATIC_GUIDANCE =
-	"`nano_agent_spawn(name, task?, timeoutMs?)` runs an agent and returns its final output (`task` overrides the YAML default). " +
-	"`nano_agent_kill(name)` aborts; `nano_agent_status(name?)` inspects. " +
+	"`nano_agent_spawn(name, task?, timeoutMs?)` runs an agent and returns its final output plus `instanceId` (`task` overrides the agent's default). " +
+	"`nano_agent_kill(name, instanceId?)` aborts a live run (instanceId required when `name` has multiple live runs). " +
+	"`nano_agent_status(name?, instanceId?)` inspects. " +
 	"`nano_agent_aggregate(tasks, aggregator, timeoutMs?)` runs N agents in parallel and an aggregator whose task may reference `{previous}`. " +
 	"`nano_agent_chain(steps, timeoutMs?)` runs agents sequentially, substituting each step's output for `{previous}` in the next. " +
+	"Read-only agents (`readOnly: true` in their YAML) may have multiple concurrent live instances; pass `instance` labels in aggregate tasks to target a specific run later. " +
 	"Issue several `spawn`/`aggregate`/`chain` calls in one turn for parallel work; chain outputs by feeding one agent's result into the next `task`.\n\n" +
-	"Add a member: YAML at `.pi/nano-team/team/<name>.yaml` with required fields `name`, `role` (one lowercased word), `instructions`, `task`. `model` is optional — omit it to inherit pi's default. `/reload` after editing. " +
+	"Add a member: YAML at `.pi/nano-team/team/<name>.yaml` with required fields `name`, `role` (one lowercased word), `instructions`, `task`, optional `readOnly` (boolean). " +
+	"Markdown + YAML frontmatter is also supported for new agents — `.md` files drop into the same dirs. " +
+	"`model` is optional — omit it to inherit pi's default. `/reload` after editing. " +
 	"Run `/subagents-doctor` to diagnose the setup.";
 
 const buildSystemPromptAddition = (team: ReadonlyMap<string, TeamMember>): string =>
@@ -58,7 +64,9 @@ const realClock = (): Clock => ({
 
 const piUiSink = (ctx: ExtensionContext): WidgetSink => ({
 	setWidget: (key, lines, opts) => {
-		if (ctx.hasUI) ctx.ui.setWidget(key, lines, opts);
+		// The pi UI's `setWidget` expects a mutable array; we treat the
+		// flusher's output as read-only and copy defensively before passing.
+		if (ctx.hasUI) ctx.ui.setWidget(key, lines ? [...lines] : undefined, opts);
 	},
 });
 
@@ -110,7 +118,7 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 
 	pi.registerCommand("subagents-doctor", {
 		description: "Print diagnostic information about the nano-team setup.",
-		handler: (_args, ctx) => {
+		handler: async (_args, ctx) => {
 			const lines: string[] = ["# nano-team diagnostic", ""];
 			lines.push(`- cwd: \`${ctx.cwd}\``);
 			lines.push(`- pi binary: \`${process.execPath}\``);
@@ -127,10 +135,23 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 			const runs = subagent?.list() ?? [];
 			const liveCount = runs.filter((run) => LIVE_AGENT_STATES.has(run.state)).length;
 			lines.push(`- active runs: ${runs.length} total, ${liveCount} live`);
+
+			// Group runs by name so two concurrent `blitz-1`/`blitz-2`
+			// instances surface under one agent heading with their ids.
+			const runsByName = new Map<string, AgentRun[]>();
 			for (const run of runs) {
-				const activity = run.activity ? ` — ${run.activity}` : "";
-				lines.push(`  - \`${run.name}\`: ${run.state}${activity}`);
+				const list = runsByName.get(run.name);
+				if (list === undefined) runsByName.set(run.name, [run]);
+				else list.push(run);
 			}
+			for (const [name, group] of runsByName) {
+				lines.push(`  - \`${name}\`:`);
+				for (const run of group) {
+					const activity = run.activity ? ` — ${run.activity}` : "";
+					lines.push(`    - ${run.instanceId}: ${run.state}${activity}`);
+				}
+			}
+
 			// Use a dedicated widget key so the flusher's "nano-team" widget
 			// doesn't overwrite this one. The handler is Promise<void> — a
 			// returned string would be discarded.

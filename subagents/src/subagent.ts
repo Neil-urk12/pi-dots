@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { type AgentRun, type AgentState, createInitialRun, LIVE_AGENT_STATES, type TeamMember } from "./types.ts";
+import { type AgentRun, type AgentState, createInitialRun, isLiveState, type TeamMember } from "./types.ts";
 import { applyStreamEvent, createAccumulator, type StreamEvent } from "./stream-parser.ts";
 import { type ProcessFactory, type ProcessHandle, ChildProcessAdapter } from "./process.ts";
 import { getErrorMessage } from "./errors.ts";
@@ -12,9 +12,18 @@ export type Subagent = Readonly<{
 		signal: AbortSignal | undefined,
 		timeoutMs?: number,
 	): Promise<Readonly<AgentRun>>;
-	kill(name: string): boolean;
+	/**
+	 * Terminates the run with the given `instanceId`. Returns true if a live
+	 * run was found and killed; false if no such run exists.
+	 */
+	kill(instanceId: string): boolean;
 	list(): readonly Readonly<AgentRun>[];
-	get(name: string): Readonly<AgentRun> | undefined;
+	/** Looks up a single run by `instanceId`. */
+	get(instanceId: string): Readonly<AgentRun> | undefined;
+	/** Returns every run (live and terminal) for the given agent name, in spawn order. */
+	getByName(name: string): readonly Readonly<AgentRun>[];
+	/** Returns the subset of `getByName(name)` whose state is `thinking` or `working`. */
+	getLiveByName(name: string): readonly Readonly<AgentRun>[];
 	subscribe(listener: () => void): () => void;
 	shutdown(): void;
 }>;
@@ -25,6 +34,14 @@ export type SubagentOptions = Readonly<{
 	factory?: ProcessFactory;
 	now?: () => number;
 	maxConcurrency?: number;
+	/**
+	 * Maximum number of runs retained in the runs map. When exceeded,
+	 * the oldest terminal-state entry is evicted on the next spawn.
+	 * Live runs are never evicted. Defaults to 200.
+	 *
+	 * @internal — primarily a test seam. End users rarely need to tune this.
+	 */
+	maxRetainedRuns?: number;
 	/** @internal test seam — bypasses process.argv inspection */
 	resolveInvocation?: () => PiInvocation;
 }>;
@@ -43,6 +60,7 @@ const derivePiInvocation = (): PiInvocation => {
 };
 
 const DEFAULT_MAX_CONCURRENCY = 4;
+const DEFAULT_MAX_RETAINED_RUNS = 200;
 
 class Semaphore {
 	private inFlight = 0;
@@ -67,10 +85,19 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 	const factory: ProcessFactory = options.factory ?? new ChildProcessAdapter();
 	const now: () => number = options.now ?? (() => Date.now());
 	const maxConcurrency = options.maxConcurrency ?? DEFAULT_MAX_CONCURRENCY;
+	const maxRetainedRuns = options.maxRetainedRuns ?? DEFAULT_MAX_RETAINED_RUNS;
 	const resolveInvocation: () => PiInvocation = options.resolveInvocation ?? derivePiInvocation;
 
+	// Primary stores are keyed by `instanceId`. The `nameToInstances` index
+	// is the cheap path for name-based lookups (kill/status by name with
+	// disambiguation; flusher widget grouping; /subagents-doctor output).
+	// Terminal-state and failed-spawn entries are evicted by
+	// `evictOldestTerminalRun` once the map exceeds `maxRetainedRuns`;
+	// see that helper for the policy.
 	const runs = new Map<string, AgentRun>();
 	const handles = new Map<string, ProcessHandle>();
+	const nameToInstances = new Map<string, string[]>();
+	const counters = new Map<string, number>();
 	const listeners = new Set<() => void>();
 	let cachedInvocation: PiInvocation | null = null;
 	let isShuttingDown = false;
@@ -85,9 +112,60 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 		for (const listener of listeners) listener();
 	};
 
-	const updateRun = (name: string, patch: Partial<AgentRun>): void => {
-		const previous = runs.get(name) ?? createInitialRun(name);
-		runs.set(name, { ...previous, ...patch });
+	/**
+	 * Mints `${name}-${n}` for the next run of this name. Synchronous: the
+	 * caller increments the counter and reserves the id before any async
+	 * subprocess work, so concurrent spawns of the same name cannot collide.
+	 */
+	const mintInstanceId = (name: string): string => {
+		const next = (counters.get(name) ?? 0) + 1;
+		counters.set(name, next);
+		return `${name}-${next}`;
+	};
+
+	const indexAdd = (name: string, instanceId: string): void => {
+		const list = nameToInstances.get(name);
+		if (list === undefined) nameToInstances.set(name, [instanceId]);
+		else list.push(instanceId);
+	};
+
+	const indexRemove = (name: string, instanceId: string): void => {
+		const list = nameToInstances.get(name);
+		if (list === undefined) return;
+		const idx = list.indexOf(instanceId);
+		if (idx !== -1) list.splice(idx, 1);
+		if (list.length === 0) nameToInstances.delete(name);
+	};
+
+	/**
+	 * Evict the oldest terminal-state run from `runs`. Live runs
+	 * (`thinking` or `working`) are skipped — if every entry is live,
+	 * this is a no-op and the caller keeps growing past the cap until
+	 * something terminates. Cleans up the `nameToInstances` index so
+	 * stale instanceIds don't linger.
+	 */
+	const evictOldestTerminalRun = (): void => {
+		let oldestKey: string | null = null;
+		let oldestStartedAt = Infinity;
+		for (const [key, run] of runs) {
+			if (isLiveState(run.state)) continue;
+			if (run.startedAt < oldestStartedAt) {
+				oldestStartedAt = run.startedAt;
+				oldestKey = key;
+			}
+		}
+		if (oldestKey === null) return;
+		const removed = runs.get(oldestKey);
+		runs.delete(oldestKey);
+		if (removed !== undefined) {
+			indexRemove(removed.name, oldestKey);
+		}
+	};
+
+	const updateRun = (instanceId: string, patch: Partial<AgentRun>): void => {
+		const previous = runs.get(instanceId);
+		if (previous === undefined) return;
+		runs.set(instanceId, { ...previous, ...patch });
 		notify();
 	};
 
@@ -99,25 +177,49 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 	): Promise<AgentRun> => {
 		if (isShuttingDown) throw new Error(`subagent is shut down`);
 
-		const existingRun = runs.get(member.name);
-		if (existingRun && LIVE_AGENT_STATES.has(existingRun.state)) {
-			throw new Error(`agent '${member.name}' is already running (state=${existingRun.state})`);
+		// Duplicate-spawn policy: read-only agents (TeamMember.readOnly === true)
+		// may have multiple concurrent live instances. Write-capable agents
+		// preserve the single-slot invariant — the second concurrent spawn
+		// rejects with the same error message callers used to see.
+		if (member.readOnly !== true) {
+			// The runs map is keyed by `instanceId`, not by name — look up the
+			// agent's live instanceIds via the index and check each one.
+			const liveInstances = nameToInstances.get(member.name) ?? [];
+			for (const id of liveInstances) {
+				const existingRun = runs.get(id);
+				if (existingRun && isLiveState(existingRun.state)) {
+					throw new Error(`agent '${member.name}' is already running (state=${existingRun.state})`);
+				}
+			}
 		}
 		if (signal?.aborted) throw new Error(`spawn aborted before start for '${member.name}'`);
 
-		// Transition to "thinking" synchronously so a concurrent spawn sees us as live
-		// before any async work. If factory.start() fails below, we transition to "error"
-		// with the failure message — the run store remains the single source of truth.
-		updateRun(member.name, {
+		// Mint the instance id synchronously so concurrent spawns of the
+		// same read-only agent cannot race the counter.
+		const instanceId = mintInstanceId(member.name);
+		runs.set(instanceId, createInitialRun(member.name, instanceId, task));
+		indexAdd(member.name, instanceId);
+
+		// Transition to "thinking" synchronously so a concurrent spawn sees
+		// us as live before any async work. If factory.start() fails below,
+		// we transition to "error" — the run store remains the single source
+		// of truth. `task` was already set by `createInitialRun` above; this
+		// patch carries only the state-machine transition so the invariants
+		// stay explicit.
+		updateRun(instanceId, {
 			state: "thinking",
-			task,
 			startedAt: now(),
-			endedAt: null,
-			transcript: "",
-			activity: null,
-			lastError: null,
-			pid: null,
 		});
+
+		// Bound the runs map: when we exceed `maxRetainedRuns`, evict the
+		// oldest terminal-state entry. Live runs are never evicted; if every
+		// entry is live (e.g. the semaphore is fully booked), the map grows
+		// past the cap until something terminates. The check runs after the
+		// "thinking" transition so the new entry's `startedAt` is `now()`,
+		// not 0 from the initialiser — preventing self-eviction.
+		if (runs.size > maxRetainedRuns) {
+			evictOldestTerminalRun();
+		}
 
 		const invocation = getInvocation();
 		const baseArgs = [
@@ -141,7 +243,7 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 		try {
 			handle = await factory.start(invocation.command, baseArgs, member.instructions, cwd);
 		} catch (error) {
-			updateRun(member.name, {
+			updateRun(instanceId, {
 				state: "error",
 				endedAt: now(),
 				lastError: getErrorMessage(error),
@@ -149,8 +251,8 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 			throw error;
 		}
 
-		handles.set(member.name, handle);
-		updateRun(member.name, { pid: handle.pid ?? null });
+		handles.set(instanceId, handle);
+		updateRun(instanceId, { pid: handle.pid ?? null });
 
 		// Declared at the function scope (NOT inside the inner try) so the
 		// `finally` block can always clear it, even if an earlier statement
@@ -188,7 +290,7 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 				const event = parsed as StreamEvent;
 				if (typeof event.type !== "string") return;
 				if (!applyStreamEvent(acc, event)) return;
-				updateRun(member.name, {
+				updateRun(instanceId, {
 					state: acc.state,
 					transcript: acc.transcript,
 					activity: acc.activity,
@@ -258,7 +360,7 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 					handle.on("close", finalize);
 				});
 
-			updateRun(member.name, {
+			updateRun(instanceId, {
 				state: finalState.state,
 				endedAt: finalState.endedAt,
 				activity: null,
@@ -272,7 +374,7 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 			// the run to error explicitly so it doesn't stay stuck in
 			// 'thinking' forever — a real failure mode the lyra / orion
 			// reviews surfaced.
-			updateRun(member.name, {
+			updateRun(instanceId, {
 				state: "error",
 				endedAt: now(),
 				activity: null,
@@ -281,16 +383,28 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 			});
 			throw error;
 		} finally {
-			// Always clear the SIGKILL grace timer — without this it would
-			// fire after a clean exit and call kill() on a dead handle.
+			// Backstop clear: `finalize` already cleared `timeoutHandle` on
+			// the success path, so this is the throw-path safety net. If the
+			// body throws before `finalize` runs (e.g. a synchronous error
+			// in stream setup), the SIGKILL grace timer would otherwise fire
+			// against a dead handle.
 			if (timeoutHandle) {
 				clearTimeout(timeoutHandle);
 				timeoutHandle = null;
 			}
-			handles.delete(member.name);
+			handles.delete(instanceId);
 		}
 
-		return runs.get(member.name) ?? createInitialRun(member.name, task);
+		const finalRun = runs.get(instanceId);
+		if (finalRun === undefined) {
+			// Should be unreachable: we minted and indexed this id ourselves.
+			// Reachable when shutdown() runs between spawn() and close and
+			// clears the runs map. Returning a fresh AgentRun here keeps the
+			// promise well-formed so callers do not see a spurious rejection
+			// for an otherwise-completed spawn.
+			return createInitialRun(member.name, instanceId, task);
+		}
+		return finalRun;
 	};
 
 	const shutdown = (): void => {
@@ -301,6 +415,9 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 			handle.kill();
 		}
 		handles.clear();
+		runs.clear();
+		nameToInstances.clear();
+		counters.clear();
 		listeners.clear();
 	};
 
@@ -313,17 +430,39 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 	return Object.freeze({
 		spawn: (member, task, signal, timeoutMs) =>
 			semaphore.run(() => spawnAgent(member, task, signal, timeoutMs)),
-		kill: (name) => {
-			const handle = handles.get(name);
+		kill: (instanceId) => {
+			const handle = handles.get(instanceId);
 			if (!handle) return false;
 			handle.kill();
 			return true;
 		},
 		list: () => Array.from(runs.values()),
-		get: (name) => runs.get(name),
+		get: (instanceId) => runs.get(instanceId),
+		getByName: (name) => {
+			const ids = nameToInstances.get(name);
+			if (ids === undefined) return [];
+			const out: AgentRun[] = [];
+			for (const id of ids) {
+				const run = runs.get(id);
+				if (run !== undefined) out.push(run);
+			}
+			return out;
+		},
+		getLiveByName: (name) => {
+			const ids = nameToInstances.get(name);
+			if (ids === undefined) return [];
+			const out: AgentRun[] = [];
+			for (const id of ids) {
+				const run = runs.get(id);
+				if (run !== undefined && isLiveState(run.state)) out.push(run);
+			}
+			return out;
+		},
 		subscribe: (listener) => {
 			listeners.add(listener);
-			return () => { listeners.delete(listener); };
+			return () => {
+				listeners.delete(listener);
+			};
 		},
 		shutdown,
 	});
