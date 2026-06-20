@@ -647,9 +647,9 @@ export const registerTools = (
 		name: "nano_agent_status",
 		label: "Status of nano-team agents",
 		description:
-			"Inspect team members. With `name`, returns details for that agent's current run (state, transcript, error). Without, returns a markdown table of all agents and their live/completed instances. When `name` has multiple live instances (read-only agents), pass `instanceId` to inspect a single run; the call rejects as ambiguous otherwise.",
+			"Inspect team members. With `name`, returns details for that agent's most recent historical run (live or terminated). Without, returns a markdown table of all live and historical instances. When `name` has multiple live runs (read-only agents), pass `instanceId` to inspect a single run; the call rejects as ambiguous otherwise. Note: 'no live runs' does NOT mean 'never spawned' — when the agent has prior runs that have all terminated, the result names those `instanceId`s; a 'has never been spawned' message only appears when the name was never used in this session.",
 		promptSnippet:
-			"`nano_agent_status(name?, instanceId?)` — list nano-team agents and their states (or one agent's transcript).",
+			"`nano_agent_status(name?, instanceId?)` — list nano-team agents and their states (or one agent's most recent historical run when no live run exists for that name).",
 		parameters: StatusParams,
 		async execute(_toolCallId, params: StatusArgs) {
 			const team = getTeam();
@@ -679,16 +679,32 @@ export const registerTools = (
 					if (!member) {
 						throw new Error(`unknown agent '${params.name}'. available: ${formatAvailableAgents(team)}`);
 					}
-					const focusedRun = subagent.getByName(params.name).at(-1);
-					if (focusedRun === undefined) {
+					const historicalRuns = subagent.getByName(params.name);
+					if (historicalRuns.length === 0) {
 						return {
 							content: [asTextContent(`agent '${params.name}' has never been spawned`)],
 							details: { team: teamArray, runs: allRuns },
 						};
 					}
+					const liveRuns = subagent.getLiveByName(params.name);
+					if (liveRuns.length > 0) {
+						// Unreachable by construction: resolveDisambiguation returned
+						// 'none', which means getLiveByName returned 0. The two reads are
+						// synchronous (no awaits between them), so no JS-level race can
+						// land here — only a contract bug in resolveDisambiguation. Fail
+						// loudly rather than silently rendering stale data.
+						throw new Error(
+							`internal: agent '${params.name}' has ${liveRuns.length} live run${liveRuns.length === 1 ? "" : "s"} but resolveDisambiguation returned 'none'; this is a contract bug in resolveDisambiguation`,
+						);
+					}
+					const historicalIds = historicalRuns.map((run) => run.instanceId).join(", ");
 					return {
-						content: [asTextContent(renderSingleAgentStatus(focusedRun, member))],
-						details: { team: teamArray, runs: allRuns, focused: { run: focusedRun, member } },
+						content: [
+							asTextContent(
+								`agent '${params.name}' has ${historicalRuns.length} historical run${historicalRuns.length === 1 ? "" : "s"} (${historicalIds}); pass instanceId to inspect one`,
+							),
+						],
+						details: { team: teamArray, runs: allRuns },
 					};
 				}
 				const run = subagent.get(disambiguation.instanceId);

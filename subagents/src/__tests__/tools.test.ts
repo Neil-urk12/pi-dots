@@ -747,28 +747,45 @@ type CapturedExecute = (
 const captureExecute = (): {
 	pi: ExtensionAPI;
 	captured: Map<string, CapturedExecute>;
+	descriptions: Map<string, { description: string; promptSnippet: string }>;
 } => {
 	const captured = new Map<string, CapturedExecute>();
+	const descriptions = new Map<string, { description: string; promptSnippet: string }>();
 	// Minimal ExtensionAPI stand-in: only registerTool is exercised by
 	// registerTools, so the rest of the surface is intentionally absent.
 	// The cast at the end is the standard test-only pattern for this kind
 	// of dependency isolation.
 	const pi = {
-		registerTool: (def: { name: string; execute: CapturedExecute }) => {
+		registerTool: (def: {
+			name: string;
+			description: string;
+			promptSnippet: string;
+			execute: CapturedExecute;
+		}) => {
 			captured.set(def.name, def.execute);
+			descriptions.set(def.name, { description: def.description, promptSnippet: def.promptSnippet });
 		},
 	} as unknown as ExtensionAPI;
-	return { pi, captured };
+	return { pi, captured, descriptions };
 };
 
 // registerTools only ever calls `subagent.spawn` (via the local `spawn`
 // constant at tools.ts:493-494). The other methods on the Subagent
-// interface are stubbed out so the mock type-checks.
-const mockSubagent = (spawn: SpawnFn): Subagent => ({
+// interface are stubbed out so the mock type-checks. The status-tool tests
+// (below) need getByName / getLiveByName to return controlled data, so
+// the mock accepts optional overrides; the default of `() => []` covers
+// the aggregate / chain tests which never touch the status tool.
+type SubagentStateOverrides = {
+	getByName?: (name: string) => readonly Readonly<AgentRun>[];
+	getLiveByName?: (name: string) => readonly Readonly<AgentRun>[];
+};
+const mockSubagent = (spawn: SpawnFn, overrides: SubagentStateOverrides = {}): Subagent => ({
 	spawn,
 	kill: () => false,
 	list: () => [],
 	get: () => undefined,
+	getByName: (overrides.getByName ?? (() => [])) as (name: string) => readonly Readonly<AgentRun>[],
+	getLiveByName: (overrides.getLiveByName ?? (() => [])) as (name: string) => readonly Readonly<AgentRun>[],
 	subscribe: () => () => {},
 	shutdown: () => {},
 });
@@ -1009,5 +1026,100 @@ describe("registerTools", () => {
 		expect(text).toMatch(/=== a \(test-mock-\d+\) ===/);
 		expect(text).toContain("x");
 		expect(text).toMatch(/Failure: step 1 \('b'\) failed: b \(test-mock-\d+\) failed: nope/);
+	});
+
+	describe("nano_agent_status", () => {
+		test("returns historical summary when name has prior runs but no live", async () => {
+			const team = buildTeam();
+			const historical = [
+				makeRun("done", "result 1", null, "scout"),
+				makeRun("done", "result 2", null, "scout"),
+				makeRun("done", "result 3", null, "scout"),
+			];
+			const { spawn } = makeSpawnRecorder(new Map());
+			const { pi, captured } = captureExecute();
+			registerTools(
+				pi,
+				mockSubagent(spawn, {
+					getByName: (name) => (name === "scout" ? historical : []),
+					getLiveByName: () => [],
+				}),
+				() => team,
+			);
+
+			const execute = captured.get("nano_agent_status");
+			expect(execute).toBeDefined();
+			const result = await execute!("call-id", { name: "scout" }, undefined);
+
+			const text = result.content[0]!.text;
+			expect(text).toContain("3 historical runs");
+			expect(text).toContain(historical[0]!.instanceId);
+			expect(text).toContain(historical[1]!.instanceId);
+			expect(text).toContain(historical[2]!.instanceId);
+			// The "never spawned" message is for a different case (truly no runs
+			// in this session). It must not appear here, otherwise the LLM caller
+			// draws the same wrong conclusion the blitz aggregator did.
+			expect(text).not.toContain("has never been spawned");
+			expect(text).toContain("pass instanceId to inspect one");
+		});
+
+		test("uses singular 'run' when name has exactly one historical run", async () => {
+			const team = buildTeam();
+			const historical = [makeRun("done", "only result", null, "scout")];
+			const { spawn } = makeSpawnRecorder(new Map());
+			const { pi, captured } = captureExecute();
+			registerTools(
+				pi,
+				mockSubagent(spawn, {
+					getByName: (name) => (name === "scout" ? historical : []),
+					getLiveByName: () => [],
+				}),
+				() => team,
+			);
+
+			const execute = captured.get("nano_agent_status");
+			const result = await execute!("call-id", { name: "scout" }, undefined);
+
+			const text = result.content[0]!.text;
+			expect(text).toContain("1 historical run ");
+			expect(text).not.toContain("1 historical runs");
+		});
+
+		test("returns 'has never been spawned' when getByName is empty", async () => {
+			const team = buildTeam();
+			const { spawn } = makeSpawnRecorder(new Map());
+			const { pi, captured } = captureExecute();
+			registerTools(
+				pi,
+				mockSubagent(spawn, {
+					getByName: () => [],
+					getLiveByName: () => [],
+				}),
+				() => team,
+			);
+
+			const execute = captured.get("nano_agent_status");
+			const result = await execute!("call-id", { name: "scout" }, undefined);
+
+			expect(result.content[0]!.text).toBe("agent 'scout' has never been spawned");
+		});
+
+		test("tool description disambiguates live vs historical state (regression guard)", () => {
+			const { pi, descriptions } = captureExecute();
+			const { spawn } = makeSpawnRecorder(new Map());
+			registerTools(pi, mockSubagent(spawn), () => buildTeam());
+
+			const statusTool = descriptions.get("nano_agent_status");
+			expect(statusTool).toBeDefined();
+			// The description must call out the "no live ≠ never spawned" trap
+			// that motivated task 10.1, name the historical terminology, and
+			// reference the "never been spawned" message. If any of these
+			// three load-bearing tokens drift, the LLM caller reverts to the
+			// same misread that motivated task 10.1.
+			const desc = statusTool!.description.toLowerCase();
+			expect(desc).toContain("historical");
+			expect(desc).toContain("never been spawned");
+			expect(desc).toContain("no live");
+		});
 	});
 });

@@ -73,6 +73,22 @@ nano_agent_aggregate({
 
 The aggregator is itself a named agent. `{previous[0]}`, `{previous[1]}`, etc. index into the parallel results in declared order.
 
+### Aggregator tasks: synthesize, don't verify
+
+The wrapper has already substituted `{previous[N]}` into the aggregator's `task`. The aggregator should consume those outputs, not re-verify whether the upstream tasks ran. Asking it to call `nano_agent_status` to "confirm all three completed" wastes tokens — `nano_agent_status` returns a snapshot the LLM can misread, and the substituted text already tells the aggregator whether a run produced output.
+
+Good — synthesis:
+
+```
+aggregator: { name: "blitz", task: "Synthesize these three reports into a single recommendation. {previous[0]} {previous[1]} {previous[2]}" }
+```
+
+Bad — invites failure verification:
+
+```
+aggregator: { name: "blitz", task: "Confirm all three completed and report any failures. {previous[0]} {previous[1]} {previous[2]}" }
+```
+
 ### Sequential pipeline (`nano_agent_chain`)
 
 ```
