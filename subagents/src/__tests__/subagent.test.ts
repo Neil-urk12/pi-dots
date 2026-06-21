@@ -647,12 +647,14 @@ describe("Subagent stream parsing integration", () => {
 		expect(run.state).toBe("done");
 	});
 
-	test("throwing subscriber does not crash the host and surfaces the parser error", async () => {
-		// Regression: handle.stdout.on("data", ...) had no internal
-		// try/catch, so a throw from a subscriber inside notify() would
-		// escape to uncaughtException and crash the host. The fix wraps
-		// consumeLine in try/catch so the error is surfaced via
-		// acc.errorMessage and the run transitions to state: "error".
+	test("throwing subscriber does not crash the host and is isolated on every notify", async () => {
+		// Regression: the data-handler try/catch from fix-stream-parser-robustness
+		// only covers the stream-consumption pipeline. The post-promise updateRun
+		// at src/subagent.ts:368 is a separate notify() site. The subscriber now
+		// throws on every call (no one-shot guard) so the test exercises BOTH
+		// paths: the data-handler updateRun (line 293) and the post-promise
+		// updateRun (line 368). Both must be isolated — the spawn resolves with
+		// state: "error" and the run's lastError surfaces the subscriber error.
 		const { factory, handles } = createFakeFactory();
 		const subagent = createSubagent("/test", { factory });
 
@@ -661,15 +663,10 @@ describe("Subagent stream parsing integration", () => {
 		const handle = handles[0]!;
 
 		// Register AFTER the synchronous setup updates have fired so the
-		// subscriber only sees data-handler-driven notify() calls. Throw
-		// once — the data-handler fix only covers the stream-consumption
-		// pipeline; the finalize's own updateRun is out of scope here.
-		// Use tool_execution_start because message_start returns false
-		// (and skips updateRun) when state is already "thinking".
-		let thrown = false;
+		// subscriber only sees data-handler-driven notify() calls. Use
+		// tool_execution_start because message_start returns false (and
+		// skips updateRun) when state is already "thinking".
 		subagent.subscribe(() => {
-			if (thrown) return;
-			thrown = true;
 			throw new Error("subscriber kaboom");
 		});
 
@@ -684,8 +681,119 @@ describe("Subagent stream parsing integration", () => {
 
 		const run = await promise;
 		expect(run.state).toBe("error");
-		expect(run.lastError).toContain("stream parser error");
+		expect(run.lastError).toContain("subscriber error:");
 		expect(run.lastError).toContain("subscriber kaboom");
+	});
+
+	test("throwing subscriber at post-promise updateRun resolves the spawn with state: error", async () => {
+		// Regression: the post-promise updateRun at src/subagent.ts:368 was
+		// not protected by a try/catch. A subscriber that throws on every
+		// notify() call would escape the updateRun, hit the outer catch at
+		// line 375, which calls updateRun AGAIN at line 382, which fires
+		// notify() AGAIN, which throws AGAIN, propagating out of spawnAgent
+		// and rejecting the promise. The notify() fix wraps each listener
+		// invocation in try/catch and routes the error through an optional
+		// onError callback that sets acc.errorMessage and patches the run.
+		// No stream events are emitted here so the data-handler path (line
+		// 293) is not exercised — only the post-promise path is tested.
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+
+		subagent.subscribe(() => {
+			throw new Error("subscriber kaboom");
+		});
+
+		const promise = subagent.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		handle.emitClose(0);
+
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toContain("subscriber error:");
+		expect(run.lastError).toContain("subscriber kaboom");
+	});
+
+	test("throwing subscriber does not block subsequent subscribers", async () => {
+		// Regression: notify()'s for-loop must continue past a throwing
+		// listener so other subscribers still receive the notification.
+		// The spec requires "subsequent subscribers are still invoked for
+		// the same notification" — a future refactor that breaks the loop
+		// (e.g., `return` after catch) would silently violate this.
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+
+		let goodCalls = 0;
+		subagent.subscribe(() => {
+			throw new Error("first subscriber kaboom");
+		});
+		subagent.subscribe(() => {
+			goodCalls++;
+		});
+
+		const promise = subagent.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		handles[0]!.emitStdout(
+			jsonLine({
+				type: "tool_execution_start",
+				toolName: "read",
+				args: { path: "/x" },
+			}),
+		);
+		handles[0]!.emitClose(0);
+
+		await promise;
+		expect(goodCalls).toBeGreaterThan(0);
+	});
+
+	test("subscriber throw does not clobber prior acc.errorMessage", async () => {
+		// Regression: sinkNotifyError's guard at src/subagent.ts:279 must
+		// preserve acc.errorMessage if it was already set (e.g., by a prior
+		// message_end with errorMessage). Without the guard, a later
+		// subscriber throw would mask the root-cause error and lastError
+		// would surface "subscriber error: ..." instead of the original
+		// "context window exceeded". The acc.errorMessage is set via the
+		// message_end path (stream-parser.ts ingestAssistantMessage), which
+		// is the public way a producer signals a context-window failure.
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+
+		subagent.subscribe(() => {
+			throw new Error("subscriber kaboom");
+		});
+
+		const promise = subagent.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		// First, set acc.errorMessage via a message_end with errorMessage.
+		handle.emitStdout(jsonLine({ type: "message_start" }));
+		handle.emitStdout(
+			jsonLine({
+				type: "message_end",
+				message: {
+					role: "assistant",
+					content: [],
+					errorMessage: "context window exceeded",
+				},
+			}),
+		);
+		// Then trigger a subscriber throw via a tool_execution_start that
+		// causes applyStreamEvent to return true and fire updateRun →
+		// notify → subscriber throw → sinkNotifyError.
+		handle.emitStdout(
+			jsonLine({
+				type: "tool_execution_start",
+				toolName: "read",
+				args: { path: "/x" },
+			}),
+		);
+		handle.emitClose(0);
+
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toBe("context window exceeded");
 	});
 });
 

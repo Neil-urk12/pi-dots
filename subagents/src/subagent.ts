@@ -108,8 +108,14 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 		return cachedInvocation;
 	};
 
-	const notify = (): void => {
-		for (const listener of listeners) listener();
+	const notify = (onError?: (error: unknown) => void): void => {
+		for (const listener of listeners) {
+			try {
+				listener();
+			} catch (error) {
+				if (onError) onError(error);
+			}
+		}
 	};
 
 	/**
@@ -162,11 +168,15 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 		}
 	};
 
-	const updateRun = (instanceId: string, patch: Partial<AgentRun>): void => {
+	const updateRun = (
+		instanceId: string,
+		patch: Partial<AgentRun>,
+		options?: { onNotifyError?: (error: unknown) => void },
+	): void => {
 		const previous = runs.get(instanceId);
 		if (previous === undefined) return;
 		runs.set(instanceId, { ...previous, ...patch });
-		notify();
+		notify(options?.onNotifyError);
 	};
 
 	const spawnAgent = async (
@@ -265,6 +275,11 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 			// changed so we only notify subscribers on real transitions.
 			const acc = createAccumulator();
 			acc.state = "thinking";
+			const sinkNotifyError = (error: unknown): void => {
+				if (acc.errorMessage !== undefined) return;
+				acc.errorMessage = `subscriber error: ${getErrorMessage(error)}`;
+				updateRun(instanceId, { state: "error", lastError: acc.errorMessage });
+			};
 			let aborted = false;
 			let stderrBuffer = "";
 			let pendingLine = "";
@@ -294,7 +309,7 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 					state: acc.state,
 					transcript: acc.transcript,
 					activity: acc.activity,
-				});
+				}, { onNotifyError: sinkNotifyError });
 			};
 
 			handle.stdout.on("data", (chunk: Buffer) => {
@@ -371,7 +386,7 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 				activity: null,
 				lastError: finalState.lastError,
 				pid: null,
-			});
+			}, { onNotifyError: sinkNotifyError });
 		} catch (error) {
 			// Defensive: if the body throws before reaching the final updateRun
 			// (e.g. a synchronous throw from updateRun itself, a bad chunk
