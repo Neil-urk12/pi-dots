@@ -373,4 +373,42 @@ describe("integration: full agent lifecycle", () => {
 		});
 		expect(acc.errorMessage).toBe("context window exceeded");
 	});
+
+	test("message_start resets errorMessage and stopReason from a prior failed message", () => {
+		// Regression: when pi auto-retries a transient error, the failed
+		// message_end{stopReason:"error", errorMessage:"rate limit"} leaks
+		// into the successful retry's finalize because errorMessage was
+		// never cleared. message_start is the new-message boundary and
+		// must invalidate any prior terminal state.
+		const acc = createAccumulator();
+
+		applyStreamEvent(acc, { type: "message_start" });
+		applyStreamEvent(acc, {
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [],
+				stopReason: "error",
+				errorMessage: "rate limit",
+			},
+		});
+		expect(acc.errorMessage).toBe("rate limit");
+		expect(acc.stopReason).toBe("error");
+
+		applyStreamEvent(acc, { type: "message_start" });
+		expect(acc.errorMessage).toBeUndefined();
+		expect(acc.stopReason).toBeUndefined();
+
+		applyStreamEvent(acc, {
+			type: "message_end",
+			message: {
+				role: "assistant",
+				content: [{ type: "text", text: "recovered" }],
+				stopReason: "end_turn",
+			},
+		});
+		expect(acc.errorMessage).toBeUndefined();
+		expect(acc.stopReason).toBe("end_turn");
+		expect(acc.stopReason).not.toBe("error");
+	});
 });

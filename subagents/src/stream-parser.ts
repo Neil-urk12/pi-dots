@@ -89,6 +89,8 @@ export const ingestAssistantMessage = (accumulator: StreamAccumulator, raw: unkn
 export const applyStreamEvent = (accumulator: StreamAccumulator, event: StreamEvent): boolean => {
 	switch (event.type) {
 		case "message_start": {
+			accumulator.errorMessage = undefined;
+			accumulator.stopReason = undefined;
 			if (accumulator.state === "thinking") return false;
 			accumulator.state = "thinking";
 			return true;

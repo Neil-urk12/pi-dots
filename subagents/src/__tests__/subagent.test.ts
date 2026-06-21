@@ -646,6 +646,47 @@ describe("Subagent stream parsing integration", () => {
 		const run = await promise;
 		expect(run.state).toBe("done");
 	});
+
+	test("throwing subscriber does not crash the host and surfaces the parser error", async () => {
+		// Regression: handle.stdout.on("data", ...) had no internal
+		// try/catch, so a throw from a subscriber inside notify() would
+		// escape to uncaughtException and crash the host. The fix wraps
+		// consumeLine in try/catch so the error is surfaced via
+		// acc.errorMessage and the run transitions to state: "error".
+		const { factory, handles } = createFakeFactory();
+		const subagent = createSubagent("/test", { factory });
+
+		const promise = subagent.spawn(member(), "task", undefined);
+		await yieldToRunner();
+		const handle = handles[0]!;
+
+		// Register AFTER the synchronous setup updates have fired so the
+		// subscriber only sees data-handler-driven notify() calls. Throw
+		// once — the data-handler fix only covers the stream-consumption
+		// pipeline; the finalize's own updateRun is out of scope here.
+		// Use tool_execution_start because message_start returns false
+		// (and skips updateRun) when state is already "thinking".
+		let thrown = false;
+		subagent.subscribe(() => {
+			if (thrown) return;
+			thrown = true;
+			throw new Error("subscriber kaboom");
+		});
+
+		handle.emitStdout(
+			jsonLine({
+				type: "tool_execution_start",
+				toolName: "read",
+				args: { path: "/tmp/x" },
+			}),
+		);
+		handle.emitClose(0);
+
+		const run = await promise;
+		expect(run.state).toBe("error");
+		expect(run.lastError).toContain("stream parser error");
+		expect(run.lastError).toContain("subscriber kaboom");
+	});
 });
 
 describe("Subagent runs cap", () => {

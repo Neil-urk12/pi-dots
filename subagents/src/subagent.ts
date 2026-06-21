@@ -301,7 +301,12 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 				pendingLine += chunk.toString("utf-8");
 				let newlineIndex = pendingLine.indexOf("\n");
 				while (newlineIndex !== -1) {
-					consumeLine(pendingLine.slice(0, newlineIndex));
+					const line = pendingLine.slice(0, newlineIndex);
+					try {
+						consumeLine(line);
+					} catch (error) {
+						acc.errorMessage = `stream parser error: ${error instanceof Error ? error.message : String(error)}`;
+					}
 					pendingLine = pendingLine.slice(newlineIndex + 1);
 					newlineIndex = pendingLine.indexOf("\n");
 				}
