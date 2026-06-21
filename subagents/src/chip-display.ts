@@ -1,6 +1,79 @@
 import type { Theme, ThemeColor } from "@mariozechner/pi-coding-agent";
 import { isLiveState, type AgentRun, type AgentState, type TeamMember } from "./types.ts";
 
+// ── Public types ─────────────────────────────────────────────────────
+
+export type TimerHandle = Readonly<{ cancel(): void }>;
+
+export type Clock = Readonly<{
+	now(): number;
+	setTimeout(fn: () => void, ms: number): TimerHandle;
+	setInterval(fn: () => void, ms: number): TimerHandle;
+}>;
+
+export const WIDGET_KEY = "nano-team";
+export const WIDGET_PLACEMENT = "aboveEditor" as const;
+export const FLUSH_DEBOUNCE_MS = 50;
+export const ANIMATION_FRAME_MS = 300;
+export const FALLBACK_TERMINAL_COLS = 80;
+
+export type WidgetSink = Readonly<{
+	setWidget(
+		key: string,
+		lines: readonly string[] | undefined,
+		opts: { placement: typeof WIDGET_PLACEMENT },
+	): void;
+}>;
+
+/**
+ * The chip display (formerly "widget flusher") owns the animated chip-row
+ * lifecycle above the editor. The only external seam is the 3-method
+ * lifecycle (`schedule`, `cancel`, `dispose`); everything else — debounce,
+ * animation interval, pure rendering — is internal.
+ */
+export type ChipDisplay = Readonly<{
+	schedule(): void;
+	cancel(): void;
+	tick(now: number): void;
+	dispose(): void;
+}>;
+
+export type ChipDisplayRunner = Readonly<{ list(): readonly AgentRun[] }>;
+
+export type ChipDisplayDeps = Readonly<{
+	clock: Clock;
+	sink: WidgetSink;
+	getRunner: () => ChipDisplayRunner | null;
+	getTeam: () => ReadonlyMap<string, TeamMember>;
+	getCols: () => number;
+	theme: Theme;
+	setStatus?: (text: string | undefined) => void;
+}>;
+
+// ── Status text formatting ───────────────────────────────────────────
+
+/**
+ * Build a one-line status summary of the live swarm. Returns undefined when
+ * nothing is live, so callers can clear the status line.
+ *
+ * Examples:
+ *   ("scout: thinking · worker: working", team=2)     → "scout: thinking · worker: working"
+ *   ("scout: thinking", team=3)                       → "scout: thinking · 2 idle"
+ *   ([], team=3)                                      → undefined
+ */
+export const formatStatusText = (
+	runs: readonly AgentRun[],
+	team: ReadonlyMap<string, TeamMember>,
+): string | undefined => {
+	const liveRuns = runs.filter((run) => isLiveState(run.state));
+	if (liveRuns.length === 0) return undefined;
+	const live = liveRuns.map((run) => `${run.name}: ${run.state}`).join(" · ");
+	const idleCount = team.size - liveRuns.length;
+	return idleCount > 0 ? `${live} · ${idleCount} idle` : live;
+};
+
+// ── Chip rendering constants ─────────────────────────────────────────
+
 export const AGENT_PALETTE: readonly string[] = [
 	"#e06363", "#7ad9d9", "#f0a060", "#80b8e0", "#f0c060", "#7a9aff",
 	"#c0d860", "#b48cff", "#80c878", "#d880e0", "#5dd4a3", "#f0a0c0",
@@ -330,6 +403,14 @@ const partitionIntoRows = (chips: readonly ChipFrame[], maxRowWidth: number): re
 	return rows;
 };
 
+/**
+ * Pure: render the chip-row lines for the given runs. Named-exported so
+ * tests can target the rendering logic without crossing the animation
+ * lifecycle seam.
+ *
+ * `frameIndex` drives the per-state face animation. Pass `Math.floor(now / ANIMATION_FRAME_MS)`
+ * from the live ticker, or any monotonic counter in tests.
+ */
 export const renderChips = (
 	runs: readonly AgentRun[],
 	team: ReadonlyMap<string, TeamMember>,
@@ -393,4 +474,75 @@ export const renderChips = (
 	}
 
 	return output;
+};
+
+// ── Chip display factory ─────────────────────────────────────────────
+
+export const createChipDisplay = (deps: ChipDisplayDeps): ChipDisplay => {
+	let pendingTimer: TimerHandle | null = null;
+	let animationTimer: TimerHandle | null = null;
+
+	const disarmAnimation = (): void => {
+		if (animationTimer) {
+			animationTimer.cancel();
+			animationTimer = null;
+		}
+	};
+
+	const tick = (now: number): void => {
+		pendingTimer = null;
+		const runner = deps.getRunner();
+		if (!runner) {
+			disarmAnimation();
+			deps.sink.setWidget(WIDGET_KEY, undefined, { placement: WIDGET_PLACEMENT });
+			deps.setStatus?.(undefined);
+			return;
+		}
+		const runs = runner.list();
+		const lines = renderChips(
+			runs,
+			deps.getTeam(),
+			deps.getCols(),
+			deps.theme,
+			Math.floor(now / ANIMATION_FRAME_MS),
+		);
+		deps.sink.setWidget(
+			WIDGET_KEY,
+			lines.length > 0 ? lines : undefined,
+			{ placement: WIDGET_PLACEMENT },
+		);
+		deps.setStatus?.(formatStatusText(runs, deps.getTeam()));
+		const hasLiveAgent = runs.some((run) => isLiveState(run.state));
+		disarmAnimation();
+		if (hasLiveAgent) {
+			animationTimer = deps.clock.setInterval(
+				() => tick(deps.clock.now()),
+				ANIMATION_FRAME_MS,
+			);
+		}
+	};
+
+	return {
+		schedule: () => {
+			if (pendingTimer) return;
+			pendingTimer = deps.clock.setTimeout(() => tick(deps.clock.now()), FLUSH_DEBOUNCE_MS);
+		},
+		cancel: () => {
+			if (pendingTimer) {
+				pendingTimer.cancel();
+				pendingTimer = null;
+			}
+			disarmAnimation();
+		},
+		tick: (now: number) => tick(now),
+		dispose: () => {
+			if (pendingTimer) {
+				pendingTimer.cancel();
+				pendingTimer = null;
+			}
+			disarmAnimation();
+			deps.sink.setWidget(WIDGET_KEY, undefined, { placement: WIDGET_PLACEMENT });
+			deps.setStatus?.(undefined);
+		},
+	};
 };

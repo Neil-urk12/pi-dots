@@ -4,12 +4,12 @@ import { loadTeam } from "./src/team.ts";
 import { registerTools } from "./src/tools.ts";
 import {
 	type Clock,
-	createWidgetFlusher,
+	createChipDisplay,
+	type ChipDisplay,
 	FALLBACK_TERMINAL_COLS,
-	type WidgetFlusher,
 	type WidgetSink,
 	WIDGET_PLACEMENT,
-} from "./src/flusher.ts";
+} from "./src/chip-display.ts";
 import { LIVE_AGENT_STATES, type AgentRun, type TeamMember } from "./src/types.ts";
 
 const TASK_SUMMARY_MAX_CHARS = 80;
@@ -65,7 +65,7 @@ const realClock = (): Clock => ({
 const piUiSink = (ctx: ExtensionContext): WidgetSink => ({
 	setWidget: (key, lines, opts) => {
 		// The pi UI's `setWidget` expects a mutable array; we treat the
-		// flusher's output as read-only and copy defensively before passing.
+		// chip-display's output as read-only and copy defensively before passing.
 		if (ctx.hasUI) ctx.ui.setWidget(key, lines ? [...lines] : undefined, opts);
 	},
 });
@@ -74,7 +74,7 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 	let team: ReadonlyMap<string, TeamMember> = new Map();
 	let loadErrors: readonly string[] = [];
 	let subagent: Subagent | null = null;
-	let flusher: WidgetFlusher | null = null;
+	let chipDisplay: ChipDisplay | null = null;
 	let unsubscribe: (() => void) | null = null;
 
 	pi.on("session_start", async (_event, ctx) => {
@@ -87,7 +87,7 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 		}
 
 		subagent = createSubagent(ctx.cwd);
-		flusher = createWidgetFlusher({
+		chipDisplay = createChipDisplay({
 			clock: realClock(),
 			sink: piUiSink(ctx),
 			getRunner: () => subagent,
@@ -98,9 +98,9 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 				if (ctx.hasUI) ctx.ui.setStatus("nano-team", text);
 			},
 		});
-		unsubscribe = subagent.subscribe(() => flusher?.schedule());
+		unsubscribe = subagent.subscribe(() => chipDisplay?.schedule());
 		registerTools(pi, subagent, () => team);
-		flusher.schedule();
+		chipDisplay.schedule();
 	});
 
 	pi.on("before_agent_start", (event) => ({
@@ -110,9 +110,9 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 	pi.on("session_shutdown", () => {
 		unsubscribe?.();
 		unsubscribe = null;
-		flusher?.dispose();
+		chipDisplay?.dispose();
 		subagent?.shutdown();
-		flusher = null;
+		chipDisplay = null;
 		subagent = null;
 	});
 
@@ -152,7 +152,7 @@ export default function nanoTeam(pi: ExtensionAPI): void {
 				}
 			}
 
-			// Use a dedicated widget key so the flusher's "nano-team" widget
+			// Use a dedicated widget key so the chip-display's "nano-team" widget
 			// doesn't overwrite this one. The handler is Promise<void> — a
 			// returned string would be discarded.
 			ctx.ui.setWidget("nano-team-doctor", lines, { placement: WIDGET_PLACEMENT });

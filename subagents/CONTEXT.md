@@ -35,16 +35,16 @@ An agent definition shipped inside the `nano-team` package (`agents/*.md`), load
 ### Rendering
 
 **Chip**:
-The visual unit rendered by the widget module: face (eyes + mouth animated per state) + name + role + activity line, wrapped in a bordered box. One chip per active AgentRun.
+The visual unit rendered by the chip display: face (eyes + mouth animated per state) + name + role + activity line, wrapped in a bordered box. One chip per live `AgentRun` (live = `thinking` or `working`).
 _Avoid_: widget, card, tile
 
-**Widget flusher**:
-The debounced render loop (`schedule` / `cancel` / `tick`) that subscribes to Subagent state transitions and pushes chip rows to the pi UI sink. Owns the animation frame interval for live states (`thinking`, `working`).
-_Avoid_: renderer, update loop, view controller
+**Chip row**:
+The whole "animated chip row above editor" — a single deep module (`src/chip-display.ts`) that owns the debounced render loop, the animation interval for live states, and the pure chip rendering. Exposes a 3-method lifecycle (`schedule`, `cancel`, `dispose`); the pure `renderChips` is a named-export so tests can target the rendering without crossing the animation seam.
+_Avoid_: widget flusher, renderer, update loop
 
 ## Relationships
 
 - A **Team** is loaded once per session; the **Subagent** module is created with a `cwd` and resolves its own pi invocation.
 - `Subagent.spawn(member, task, signal) → Promise<AgentRun>` is the primary call path from the tools module.
-- The **widget flusher** subscribes to Subagent transitions (push) and reads `Subagent.list()` inside `tick()` (pull).
-- **Chips** are a pure function of `(runs, team, terminalCols, theme, frameIndex)` — the widget module has no knowledge of Subagent internals.
+- The **chip row** subscribes to Subagent transitions (push) and reads `Subagent.list()` inside its animation tick (pull).
+- **Chips** are a pure function of `(runs, team, terminalCols, theme, frameIndex)` — the chip-display module has no knowledge of Subagent internals.

@@ -90,7 +90,7 @@ export const createSubagent = (cwd: string, options: SubagentOptions = {}): Suba
 
 	// Primary stores are keyed by `instanceId`. The `nameToInstances` index
 	// is the cheap path for name-based lookups (kill/status by name with
-	// disambiguation; flusher widget grouping; /subagents-doctor output).
+	// disambiguation; chip-display widget grouping; /subagents-doctor output).
 	// Terminal-state and failed-spawn entries are evicted by
 	// `evictOldestTerminalRun` once the map exceeds `maxRetainedRuns`;
 	// see that helper for the policy.

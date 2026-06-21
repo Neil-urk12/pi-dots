@@ -1,4 +1,4 @@
-import type { Clock, TimerHandle } from "./flusher.ts";
+import type { Clock, TimerHandle } from "./chip-display.ts";
 
 export class NodeClock implements Clock {
 	now(): number {
