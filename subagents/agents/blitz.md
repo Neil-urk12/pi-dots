@@ -1,6 +1,7 @@
 ---
 name: blitz
 role: scout
+readOnly: true
 description: Read-only codebase recon. Greps and maps repository structure with file:line citations.
 task: |
   Explore the repository and answer the user's question with file paths, line references, and a concise summary.
