@@ -2,20 +2,17 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import path from "node:path";
 import os from "node:os";
 
-import { FooterLifecycle } from "./lifecycle.js";
+import { createEventAdapter, type EventAdapter } from "./eventAdapter.js";
 import { renderFooter } from "./renderer.js";
-import { extractOutputTokens } from "./usage.js";
 
 export type { ColorFn, FooterInput, Totals, Theme } from "./types.js";
 
 export default function (pi: ExtensionAPI) {
 	const globalConfigPath = path.join(os.homedir(), ".pi", "agent", "clean-footer.json");
-
 	const getProjectConfigPath = (cwd: string) => path.join(cwd, ".pi", "clean-footer.json");
 
 	let requestRender: () => void = () => {};
-
-	const lifecycle = new FooterLifecycle({
+	const adapter: EventAdapter = createEventAdapter({
 		globalConfigPath,
 		getProjectConfigPath,
 		getThinkingLevel: () => pi.getThinkingLevel?.(),
@@ -30,15 +27,15 @@ export default function (pi: ExtensionAPI) {
 			const command = args.trim();
 
 			if (command === "refresh") {
-				await lifecycle.refresh();
+				await adapter.refresh();
 				if (ctx.hasUI) ctx.ui.notify("Footer refreshed", "info");
 				return;
 			}
 
 			if (command === "reload") {
-				await lifecycle.reload(ctx);
-				if (ctx.hasUI && lifecycle.isEnabled) installFooter(ctx);
-				if (ctx.hasUI && !lifecycle.isEnabled) ctx.ui.setFooter(undefined);
+				await adapter.reload(ctx);
+				if (ctx.hasUI && adapter.isEnabled) installFooter(ctx);
+				if (ctx.hasUI && !adapter.isEnabled) ctx.ui.setFooter(undefined);
 				requestRender();
 				notifyConfigStatus(ctx);
 				return;
@@ -49,8 +46,7 @@ export default function (pi: ExtensionAPI) {
 				return;
 			}
 
-			// toggle
-			const enabled = await lifecycle.toggle();
+			const enabled = await adapter.toggle();
 			if (!ctx.hasUI) return;
 
 			if (enabled) {
@@ -66,56 +62,51 @@ export default function (pi: ExtensionAPI) {
 	// ── Events ─────────────────────────────────────────────────────
 
 	pi.on("session_start", async (_event, ctx) => {
-		await lifecycle.start(ctx);
-		if (ctx.hasUI && lifecycle.loadedError && lifecycle.isEnabled)
-			ctx.ui.notify(`Config error: ${lifecycle.loadedError}`, "error");
-		if (ctx.hasUI && lifecycle.isEnabled) installFooter(ctx);
+		await adapter.start(ctx);
+		if (ctx.hasUI && adapter.loadedError && adapter.isEnabled)
+			ctx.ui.notify(`Config error: ${adapter.loadedError}`, "error");
+		if (ctx.hasUI && adapter.isEnabled) installFooter(ctx);
 	});
 
 	pi.on("session_shutdown", (_event, ctx) => {
-		lifecycle.shutdown();
+		adapter.shutdown();
 		requestRender = () => {};
 		if (ctx.hasUI) ctx.ui.setFooter(undefined);
 	});
 
 	pi.on("thinking_level_select", (event) => {
-		lifecycle.onThinkingLevel(event.level);
+		adapter.onThinkingLevel(event.level);
 	});
 
 	pi.on("model_select", () => {
-		lifecycle.onModelSelect();
+		adapter.onModelSelect();
 	});
+
 	pi.on("message_start", (event) => {
-		lifecycle.onMessageStart(event.message.role);
+		adapter.onMessageStart(event.message);
 	});
+
 	pi.on("message_end", (event) => {
-		const agentMsg = event.message;
-		const outputTokens = agentMsg.role === "assistant" ? extractOutputTokens(agentMsg) : undefined;
-		lifecycle.onMessageEnd(agentMsg.role, outputTokens);
+		adapter.onMessageEnd(event.message);
 	});
 
 	pi.on("message_update", (event) => {
-		const streamEvent = event.assistantMessageEvent;
-		if (event.message.role === "assistant") {
-			const delta = "delta" in streamEvent ? streamEvent.delta : undefined;
-			const outputTokens = extractOutputTokens(event.message);
-			lifecycle.onMessageUpdate(streamEvent.type, delta, outputTokens);
-		}
+		adapter.onMessageUpdate(event);
 	});
 
 	pi.on("tool_execution_start", (event) => {
-		lifecycle.onToolExecutionStart(event.toolName);
+		adapter.onToolExecutionStart(event);
 	});
 
 	pi.on("tool_execution_end", (event) => {
-		lifecycle.onToolExecutionEnd(event.toolName);
+		adapter.onToolExecutionEnd(event);
 	});
 
 	pi.on("user_bash", () => {
-		lifecycle.onUserBash();
+		adapter.onUserBash();
 	});
 
-	// ── UI helpers ──────────────────────────────────────────────────
+	// ── UI helpers ─────────────────────────────────────────────────
 
 	function installFooter(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
@@ -127,7 +118,7 @@ export default function (pi: ExtensionAPI) {
 				invalidate() {},
 				render(width: number): string[] {
 					try {
-						const input = lifecycle.getFooterInput(ctx);
+						const input = adapter.snapshot(ctx);
 						return renderFooter(input, theme, width);
 					} catch (err) {
 						console.error("[clean-footer] render failed:", err instanceof Error ? err.message : err);
@@ -140,11 +131,11 @@ export default function (pi: ExtensionAPI) {
 
 	function notifyConfigStatus(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
-		if (lifecycle.loadedError) {
-			ctx.ui.notify(`Clean footer config error: ${lifecycle.loadedError}`, "error");
-		} else if (lifecycle.loadedWarnings.length > 0) {
+		if (adapter.loadedError) {
+			ctx.ui.notify(`Clean footer config error: ${adapter.loadedError}`, "error");
+		} else if (adapter.loadedWarnings.length > 0) {
 			ctx.ui.notify(
-				`Clean footer config loaded with warnings: ${lifecycle.loadedWarnings.join("; ")}`,
+				`Clean footer config loaded with warnings: ${adapter.loadedWarnings.join("; ")}`,
 				"warning",
 			);
 		} else {
@@ -154,8 +145,8 @@ export default function (pi: ExtensionAPI) {
 
 	function showConfig(ctx: ExtensionContext) {
 		if (!ctx.hasUI) return;
-		const loaded = lifecycle.loadedPaths.length ? lifecycle.loadedPaths.join("\n") : "none";
-		const warnings = lifecycle.loadedWarnings.length ? lifecycle.loadedWarnings.join("\n") : "none";
+		const loaded = adapter.loadedPaths.length ? adapter.loadedPaths.join("\n") : "none";
+		const warnings = adapter.loadedWarnings.length ? adapter.loadedWarnings.join("\n") : "none";
 		const projectPath = getProjectConfigPath(ctx.cwd);
 		ctx.ui.notify(
 			[
@@ -163,10 +154,10 @@ export default function (pi: ExtensionAPI) {
 				`global: ${globalConfigPath}`,
 				`project: ${projectPath}`,
 				`loaded:\n${loaded}`,
-				lifecycle.loadedError ? `error: ${lifecycle.loadedError}` : "error: none",
+				adapter.loadedError ? `error: ${adapter.loadedError}` : "error: none",
 				`warnings:\n${warnings}`,
-				`preset: ${lifecycle.config.preset}`,
-				`resolved: ${JSON.stringify(lifecycle.config)}`,
+				`preset: ${adapter.config.preset}`,
+				`resolved: ${JSON.stringify(adapter.config)}`,
 			].join("\n"),
 			"info",
 		);

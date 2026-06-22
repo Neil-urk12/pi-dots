@@ -24,7 +24,7 @@ Build output is `dist/index.js` only (single entry, no declarations, no sourcema
 ```
 src/
 ├── index.ts           # Entry point — registers commands and events via ExtensionAPI
-├── lifecycle.ts       # FooterLifecycle class — state machine wiring events → state
+├── eventAdapter.ts     # createEventAdapter factory — wires events → state
 ├── config.ts          # File I/O for JSON config loading (re-exports configSchema)
 ├── configSchema.ts    # Config types, defaults, presets, validation, resolution
 ├── renderer.ts        # Renders FooterInput → string[] using layout engine
@@ -52,7 +52,7 @@ src/
 
 - **ESM only**: `"type": "module"` in package.json. All internal imports use explicit `.js` extension (e.g., `import { Foo } from "./foo.js"`).
 - **Private class fields** with `#` prefix (not `private` keyword) — e.g., `#config`, `#git`, `#footerEnabled`
-- **Factory functions** for stateful modules: `createGitState()`, `createToksActivity()` return handle objects with methods, not classes. The lone exception is `FooterLifecycle` which is a class.
+- **Factory functions** for stateful modules: `createGitState()`, `createToksActivity()`, `createEventAdapter()` return handle objects with methods, not classes.
 - **Comment section headers**: `// ── Section name ──` pattern used throughout for visual grouping.
 - **No dependencies on `typescript` package** for type checking at runtime — TypeScript is dev-only (v6.0.3).
 - **Terse error handling**: single-line try/catch blocks; errors logged with `[clean-footer]` prefix.
@@ -67,8 +67,8 @@ src/
 
 ### Architecture & data flow
 
-1. **Entry** (`index.ts`) registers a `default` export function receiving `ExtensionAPI`. It wires lifecycle events (`session_start`, `session_shutdown`, `model_select`, `message_start/end/update`, `tool_execution_start/end`, `user_bash`, `thinking_level_select`) to `FooterLifecycle` methods.
-2. **FooterLifecycle** maintains state: config, git, toks activity, cached totals. On render, calls `getFooterInput()` which returns a `FooterInput` snapshot.
+1. **Entry** (`index.ts`) registers a `default` export function receiving `ExtensionAPI`. It wires lifecycle events (`session_start`, `session_shutdown`, `model_select`, `message_start/end/update`, `tool_execution_start/end`, `user_bash`, `thinking_level_select`) to the `EventAdapter` returned by `createEventAdapter()`.
+2. **EventAdapter** maintains state: config, git, toks activity, cached totals. On render, `snapshot(ctx)` returns a `FooterInput` for the renderer.
 3. **Renderer** takes `FooterInput`, builds segment map (model, directory, git, context, tokens variants, toks, cost), selects layout tier by terminal width, then renders left/right with separator.
 4. **Layout** (`src/layout.ts`) uses `@earendil-works/pi-tui`'s `visibleWidth` and `truncateToWidth` for CJK-aware string sizing.
 5. **Git** state (`src/git.ts`) is debounced, uses generation counter to discard stale async results, silences ENOENT and non-zero exit codes.
@@ -84,6 +84,6 @@ src/
 - **Tabs are 1 column wide** in `.editorconfig`. This is non-standard; editors may default to 4 or 8. Configure your editor to respect `.editorconfig`.
 - **All `.ts` imports use `.js` extension** — this is required by ESM + TypeScript resolution. Adding `.ts` or omitting the extension will break.
 - **`promisify` mock** in git tests needs special handling because Node's real `promisify` has built-in function special-casing that doesn't apply to `vi.fn()` mocks — see `src/git.test.ts` for the pattern.
-- **`FooterLifecycle.onMessageAbort()` is pre-wired for a future API event** that doesn't exist yet — not currently reachable.
+- **`toksActivity.onMessageAbort()` is pre-wired for a future API event** that doesn't exist yet — not currently reachable.
 - **No TypeScript config file** — `tsc` type-checking is done ad-hoc via `npx tsc` (see README for flags). The project relies on tsup's built-in type stripping for compilation.
 - **Segment values in renderer are lazy** — token segments (`tokensFull`, `tokensNoCache`, `tokensTotal`) are closures computed only for the active layout to avoid unnecessary work.

@@ -56,48 +56,42 @@ const {
 	mockConfig: vi.fn(() => ({ preset: "default" })),
 }));
 
-vi.mock("./lifecycle.js", () => {
-	return {
-		FooterLifecycle: class {
-			refresh = mockRefresh;
-			reload = mockReload;
-			toggle = mockToggle;
-			start = mockStart;
-			shutdown = mockShutdown;
-			onThinkingLevel = mockOnThinkingLevel;
-			onModelSelect = mockOnModelSelect;
-			onMessageStart = mockOnMessageStart;
-			onMessageEnd = mockOnMessageEnd;
-			onMessageUpdate = mockOnMessageUpdate;
-			onToolExecutionStart = mockOnToolExecutionStart;
-			onToolExecutionEnd = mockOnToolExecutionEnd;
-			onUserBash = mockOnUserBash;
-			getFooterInput = mockGetFooterInput;
-			get isEnabled() {
-				return mockIsEnabled();
-			}
-			get loadedError() {
-				return mockLoadedError();
-			}
-			get loadedWarnings() {
-				return mockLoadedWarnings();
-			}
-			get loadedPaths() {
-				return mockLoadedPaths();
-			}
-			get config() {
-				return mockConfig();
-			}
+vi.mock("./eventAdapter.js", () => ({
+	createEventAdapter: vi.fn(() => ({
+		refresh: mockRefresh,
+		reload: mockReload,
+		toggle: mockToggle,
+		start: mockStart,
+		shutdown: mockShutdown,
+		onThinkingLevel: mockOnThinkingLevel,
+		onModelSelect: mockOnModelSelect,
+		onMessageStart: mockOnMessageStart,
+		onMessageEnd: mockOnMessageEnd,
+		onMessageUpdate: mockOnMessageUpdate,
+		onToolExecutionStart: mockOnToolExecutionStart,
+		onToolExecutionEnd: mockOnToolExecutionEnd,
+		onUserBash: mockOnUserBash,
+		snapshot: mockGetFooterInput,
+		get isEnabled() {
+			return mockIsEnabled();
 		},
-	};
-});
+		get loadedError() {
+			return mockLoadedError();
+		},
+		get loadedWarnings() {
+			return mockLoadedWarnings();
+		},
+		get loadedPaths() {
+			return mockLoadedPaths();
+		},
+		get config() {
+			return mockConfig();
+		},
+	})),
+}));
 
 vi.mock("./renderer.js", () => ({
 	renderFooter: vi.fn(() => ["rendered footer"]),
-}));
-
-vi.mock("./usage.js", () => ({
-	extractOutputTokens: vi.fn(() => 42),
 }));
 
 import extensionFn from "./index.js";
@@ -430,29 +424,29 @@ describe("extension entry point", () => {
 	// ── Event: message_start ──────────────────────────────
 
 	describe("message_start event", () => {
-		it("forwards assistant role to lifecycle", () => {
+		it("forwards the message to the adapter", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
 			pi._events["message_start"]({ message: { role: "assistant" } });
 
-			expect(mockOnMessageStart).toHaveBeenCalledWith("assistant");
+			expect(mockOnMessageStart).toHaveBeenCalledWith({ role: "assistant" });
 		});
 
-		it("forwards user role to lifecycle", () => {
+		it("forwards user-role messages too (filtering is the adapter's job)", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
 			pi._events["message_start"]({ message: { role: "user" } });
 
-			expect(mockOnMessageStart).toHaveBeenCalledWith("user");
+			expect(mockOnMessageStart).toHaveBeenCalledWith({ role: "user" });
 		});
 	});
 
 	// ── Event: message_update ─────────────────────────────
 
 	describe("message_update event", () => {
-		it("forwards type, delta, and outputTokens for assistant messages", () => {
+		it("forwards the raw pi event to the adapter", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
@@ -461,10 +455,13 @@ describe("extension entry point", () => {
 				assistantMessageEvent: { type: "text_delta", delta: "hello" },
 			});
 
-			expect(mockOnMessageUpdate).toHaveBeenCalledWith("text_delta", "hello", 42);
+			expect(mockOnMessageUpdate).toHaveBeenCalledWith({
+				message: { role: "assistant" },
+				assistantMessageEvent: { type: "text_delta", delta: "hello" },
+			});
 		});
 
-		it("passes undefined delta when streamEvent has no delta key", () => {
+		it("forwards the event even when streamEvent has no delta key", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
@@ -473,10 +470,15 @@ describe("extension entry point", () => {
 				assistantMessageEvent: { type: "start" },
 			});
 
-			expect(mockOnMessageUpdate).toHaveBeenCalledWith("start", undefined, 42);
+			expect(mockOnMessageUpdate).toHaveBeenCalledWith({
+				message: { role: "assistant" },
+				assistantMessageEvent: { type: "start" },
+			});
 		});
 
-		it("ignores non-assistant messages", () => {
+		// Note: role-filtering is the adapter's responsibility, not index.ts.
+		// eventAdapter.test.ts covers that behaviour.
+		it("forwards non-assistant messages too (filtering moved to adapter)", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
@@ -485,14 +487,12 @@ describe("extension entry point", () => {
 				assistantMessageEvent: { type: "text_delta", delta: "hi" },
 			});
 
-			expect(mockOnMessageUpdate).not.toHaveBeenCalled();
+			expect(mockOnMessageUpdate).toHaveBeenCalledTimes(1);
 		});
 	});
 
-	// ── Event: message_end ─────────────────────────────────
-
 	describe("message_end event", () => {
-		it("extracts output tokens for assistant messages", () => {
+		it("forwards the message to the adapter (extraction is the adapter's job)", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
@@ -500,44 +500,41 @@ describe("extension entry point", () => {
 				message: { role: "assistant", usage: { output: 42 } },
 			});
 
-			expect(mockOnMessageEnd).toHaveBeenCalledWith("assistant", 42);
+			expect(mockOnMessageEnd).toHaveBeenCalledWith({
+				role: "assistant",
+				usage: { output: 42 },
+			});
 		});
 
-		it("skips output token extraction for non-assistant", () => {
+		it("forwards non-assistant messages too", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
-			pi._events["message_end"]({
-				message: { role: "user" },
-			});
+			pi._events["message_end"]({ message: { role: "user" } });
 
-			expect(mockOnMessageEnd).toHaveBeenCalledWith("user", undefined);
+			expect(mockOnMessageEnd).toHaveBeenCalledWith({ role: "user" });
 		});
 	});
 
-	// ── Event: tool_execution_end ──────────────────────────
-
 	describe("tool_execution_end event", () => {
-		it("forwards tool name to lifecycle", () => {
+		it("forwards the event to the adapter", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
 			pi._events["tool_execution_end"]({ toolName: "bash" });
 
-			expect(mockOnToolExecutionEnd).toHaveBeenCalledWith("bash");
+			expect(mockOnToolExecutionEnd).toHaveBeenCalledWith({ toolName: "bash" });
 		});
 	});
 
-	// ── Event: tool_execution_start ────────────────────────
-
 	describe("tool_execution_start event", () => {
-		it("forwards tool name to lifecycle", () => {
+		it("forwards the event to the adapter", () => {
 			const pi = makeMockPi();
 			extensionFn(pi);
 
 			pi._events["tool_execution_start"]({ toolName: "bash" });
 
-			expect(mockOnToolExecutionStart).toHaveBeenCalledWith("bash");
+			expect(mockOnToolExecutionStart).toHaveBeenCalledWith({ toolName: "bash" });
 		});
 	});
 
