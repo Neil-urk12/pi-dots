@@ -284,7 +284,7 @@ describe("renderFooter", () => {
 
 	it("applies cost color", () => {
 		const input = makeInput({
-			sessionCost: 2.50,
+			sessionCost: 2.5,
 			configOverrides: {
 				showCost: true,
 				layouts: [{ minWidth: 0, left: ["model"], right: ["context", "cost"] }],

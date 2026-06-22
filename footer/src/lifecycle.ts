@@ -4,14 +4,13 @@ import path from "node:path";
 import { defaultConfig } from "./configPresets.js";
 import { loadFooterConfig } from "./config.js";
 import type { ResolvedConfig } from "./configTypes.js";
-import type { FooterInput, Totals, ToksDisplayState } from "./types.js";
+import type { FooterInput, Totals } from "./types.js";
 import { createGitState, type GitStateHandle } from "./git.js";
 import { accumulateTotals, accumulateCost } from "./tokens.js";
 import { normalizeThinkingLevel } from "./utils.js";
 import { createToksActivity, type ToksActivityHandle } from "./toksActivity.js";
 
 const GIT_REFRESH_TOOLS = ["bash", "edit", "write"];
-
 
 type LifecycleOptions = {
 	globalConfigPath: string;
@@ -74,7 +73,7 @@ export class FooterLifecycle {
 		}
 	}
 
-shutdown(): void {
+	shutdown(): void {
 		this.#git?.clear();
 		this.#git = undefined;
 		this.#resetState();
@@ -146,7 +145,7 @@ shutdown(): void {
 		await this.#git?.refresh();
 	}
 
-async reload(ctx: ExtensionContext): Promise<void> {
+	async reload(ctx: ExtensionContext): Promise<void> {
 		// #directory doesn't change on reload — only config does
 		this.#resetState();
 		this.#loadedConfig = loadFooterConfig(
@@ -167,7 +166,7 @@ async reload(ctx: ExtensionContext): Promise<void> {
 		this.#onRenderNeeded();
 	}
 
-async toggle(): Promise<boolean> {
+	async toggle(): Promise<boolean> {
 		this.#resetState();
 		this.#footerEnabled = !this.#footerEnabled;
 		if (!this.#footerEnabled) {

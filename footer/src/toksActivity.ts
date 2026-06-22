@@ -21,7 +21,7 @@ function estimateTokens(text: string): number {
 	let total = 0;
 	for (const char of text) {
 		const cp = char.codePointAt(0) ?? 0;
-		if (cp >= 0x20 && cp <= 0x7E) {
+		if (cp >= 0x20 && cp <= 0x7e) {
 			total += TOK_ASCII;
 		} else if (
 			(cp >= 0x4e00 && cp <= 0x9fff) ||
@@ -74,9 +74,7 @@ function normalizeToolLabel(toolName: string): string {
 	for (const [prefix, label] of PREFIX_MAP) {
 		if (toolName.startsWith(prefix)) return label;
 	}
-	return toolName.length > MAX_UNKNOWN_LENGTH
-		? toolName.slice(0, MAX_UNKNOWN_LENGTH)
-		: toolName;
+	return toolName.length > MAX_UNKNOWN_LENGTH ? toolName.slice(0, MAX_UNKNOWN_LENGTH) : toolName;
 }
 
 // ── Types ────────────────────────────────────────────────────
@@ -109,9 +107,7 @@ export type ToksActivityHandle = {
 
 // ── Factory ──────────────────────────────────────────────────
 
-export function createToksActivity(options: {
-	onRenderNeeded: () => void;
-}): ToksActivityHandle {
+export function createToksActivity(options: { onRenderNeeded: () => void }): ToksActivityHandle {
 	let sample: ToksSample | undefined;
 	let activeToolCount = 0;
 	let latestToolLabel = "";
@@ -154,8 +150,12 @@ export function createToksActivity(options: {
 		}
 	}
 
-	function computeRate(estimatedTokens: number, outputTokens: number | undefined, elapsed: number): ToksDisplayState {
-		const currentTokens = (outputTokens && outputTokens > 0) ? outputTokens : estimatedTokens;
+	function computeRate(
+		estimatedTokens: number,
+		outputTokens: number | undefined,
+		elapsed: number,
+	): ToksDisplayState {
+		const currentTokens = outputTokens && outputTokens > 0 ? outputTokens : estimatedTokens;
 		return {
 			state: "rate",
 			value: currentTokens / elapsed,
@@ -179,7 +179,12 @@ export function createToksActivity(options: {
 
 		onMessageUpdate(eventType: string, delta?: string, outputTokens?: number): void {
 			if (!sample || !delta) return;
-			if (eventType !== "text_delta" && eventType !== "thinking_delta" && eventType !== "toolcall_delta") return;
+			if (
+				eventType !== "text_delta" &&
+				eventType !== "thinking_delta" &&
+				eventType !== "toolcall_delta"
+			)
+				return;
 
 			sample.estimatedTokens += estimateTokens(delta);
 			sample.hasObservedOutput = true;

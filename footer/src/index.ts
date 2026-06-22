@@ -8,7 +8,6 @@ import { extractOutputTokens } from "./usage.js";
 
 export type { ColorFn, FooterInput, Totals, Theme } from "./types.js";
 
-
 export default function (pi: ExtensionAPI) {
 	const globalConfigPath = path.join(os.homedir(), ".pi", "agent", "clean-footer.json");
 
@@ -91,9 +90,7 @@ export default function (pi: ExtensionAPI) {
 	});
 	pi.on("message_end", (event) => {
 		const agentMsg = event.message;
-		const outputTokens = agentMsg.role === "assistant"
-			? extractOutputTokens(agentMsg)
-			: undefined;
+		const outputTokens = agentMsg.role === "assistant" ? extractOutputTokens(agentMsg) : undefined;
 		lifecycle.onMessageEnd(agentMsg.role, outputTokens);
 	});
 

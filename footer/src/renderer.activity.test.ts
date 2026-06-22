@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { renderFooter } from "./renderer.js";
-import type { FooterInput, Theme, Totals } from "./types.js";
+import type { FooterInput, Theme } from "./types.js";
 import { defaultConfig as baseDefaultConfig } from "./configPresets.js";
 import type { ResolvedConfig } from "./configTypes.js";
 
@@ -25,7 +25,7 @@ function makeInput(
 	return {
 		modelId: "anthropic/claude-sonnet-4-20250514",
 		thinkingLevel: undefined,
-	directory: "my-project",
+		directory: "my-project",
 		gitBranch: "main",
 		gitDirtyCount: 0,
 		contextUsed: 50_000,

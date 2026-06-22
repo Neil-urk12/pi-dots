@@ -120,16 +120,13 @@ describe("footer config presets", () => {
 		expect(result.config.layouts).toEqual(defaultFooterLayouts);
 		expect(result.warnings).toEqual([]);
 	});
-
 });
 
 describe("deprecation warnings", () => {
 	it("warns when deprecated showCache is set", () => {
 		const result = resolveConfigWithWarnings({ showCache: true });
 
-		expect(result.warnings).toEqual(
-			expect.arrayContaining([expect.stringContaining("showCache")]),
-		);
+		expect(result.warnings).toEqual(expect.arrayContaining([expect.stringContaining("showCache")]));
 	});
 
 	it("forwards showCache value to showCacheRead when showCacheRead is not explicitly set", () => {

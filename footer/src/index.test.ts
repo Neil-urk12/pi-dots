@@ -3,12 +3,27 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 // ── Mocks ──────────────────────────────────────────────────────
 
-const { mockRefresh, mockReload, mockToggle, mockStart, mockShutdown,
-	mockOnThinkingLevel, mockOnModelSelect, mockOnMessageStart,
-	mockOnMessageEnd, mockOnMessageUpdate, mockOnToolExecutionStart,
-	mockOnToolExecutionEnd, mockOnUserBash,
-	mockGetFooterInput, mockIsEnabled, mockLoadedError, mockLoadedWarnings,
-	mockLoadedPaths, mockConfig } = vi.hoisted(() => ({
+const {
+	mockRefresh,
+	mockReload,
+	mockToggle,
+	mockStart,
+	mockShutdown,
+	mockOnThinkingLevel,
+	mockOnModelSelect,
+	mockOnMessageStart,
+	mockOnMessageEnd,
+	mockOnMessageUpdate,
+	mockOnToolExecutionStart,
+	mockOnToolExecutionEnd,
+	mockOnUserBash,
+	mockGetFooterInput,
+	mockIsEnabled,
+	mockLoadedError,
+	mockLoadedWarnings,
+	mockLoadedPaths,
+	mockConfig,
+} = vi.hoisted(() => ({
 	mockRefresh: vi.fn(async () => {}),
 	mockReload: vi.fn(async () => {}),
 	mockToggle: vi.fn(async () => true),
@@ -58,15 +73,24 @@ vi.mock("./lifecycle.js", () => {
 			onToolExecutionEnd = mockOnToolExecutionEnd;
 			onUserBash = mockOnUserBash;
 			getFooterInput = mockGetFooterInput;
-			get isEnabled() { return mockIsEnabled(); }
-			get loadedError() { return mockLoadedError(); }
-			get loadedWarnings() { return mockLoadedWarnings(); }
-			get loadedPaths() { return mockLoadedPaths(); }
-			get config() { return mockConfig(); }
+			get isEnabled() {
+				return mockIsEnabled();
+			}
+			get loadedError() {
+				return mockLoadedError();
+			}
+			get loadedWarnings() {
+				return mockLoadedWarnings();
+			}
+			get loadedPaths() {
+				return mockLoadedPaths();
+			}
+			get config() {
+				return mockConfig();
+			}
 		},
 	};
 });
-
 
 vi.mock("./renderer.js", () => ({
 	renderFooter: vi.fn(() => ["rendered footer"]),
@@ -330,10 +354,7 @@ describe("extension entry point", () => {
 			mockLoadedError.mockReturnValue("bad json");
 			await pi._events["session_start"]({}, ctx);
 
-			expect(ctx.ui.notify).toHaveBeenCalledWith(
-				expect.stringContaining("bad json"),
-				"error",
-			);
+			expect(ctx.ui.notify).toHaveBeenCalledWith(expect.stringContaining("bad json"), "error");
 		});
 	});
 
@@ -519,7 +540,6 @@ describe("extension entry point", () => {
 			expect(mockOnToolExecutionStart).toHaveBeenCalledWith("bash");
 		});
 	});
-
 
 	// ── Event: user_bash ──────────────────────────────────
 

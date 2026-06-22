@@ -6,13 +6,24 @@ import {
 	type FooterPresetId,
 	type CleanFooterConfig,
 	type ResolvedConfig,
-	type ColorConfig,
 } from "./configTypes.js";
 
 export const defaultFooterLayouts: FooterLayoutConfig[] = [
-	{ minWidth: 100, left: ["model", "directory", "git", "toks"], right: ["cost", "context", "tokensFull"] },
-	{ minWidth: 80, left: ["model", "directory", "git", "toks"], right: ["cost", "context", "tokensNoCache"] },
-	{ minWidth: 60, left: ["model", "directory", "git", "toks"], right: ["cost", "context", "tokensTotal"] },
+	{
+		minWidth: 100,
+		left: ["model", "directory", "git", "toks"],
+		right: ["cost", "context", "tokensFull"],
+	},
+	{
+		minWidth: 80,
+		left: ["model", "directory", "git", "toks"],
+		right: ["cost", "context", "tokensNoCache"],
+	},
+	{
+		minWidth: 60,
+		left: ["model", "directory", "git", "toks"],
+		right: ["cost", "context", "tokensTotal"],
+	},
 	{ minWidth: 40, left: ["model", "directory", "git"], right: ["cost", "context"] },
 	{ minWidth: 0, left: ["model"], right: ["context"] },
 ];

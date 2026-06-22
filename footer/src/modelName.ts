@@ -38,5 +38,7 @@ export function formatModelName(modelId: string, aliases: Record<string, string>
 	const gemini = withoutProvider.match(/gemini-[a-z0-9.-]+/);
 	if (gemini) return gemini[0].replace(/-preview.*/, "");
 
-	return withoutProvider.length > MAX_MODEL_NAME_LENGTH ? `${withoutProvider.slice(0, TRUNCATION_SLICE)}…` : withoutProvider;
+	return withoutProvider.length > MAX_MODEL_NAME_LENGTH
+		? `${withoutProvider.slice(0, TRUNCATION_SLICE)}…`
+		: withoutProvider;
 }

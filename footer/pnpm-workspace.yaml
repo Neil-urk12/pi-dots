@@ -1,0 +1,5 @@
+# Per-project pnpm config for pi-clean-footer.
+# Required by pnpm v11+ — the `pnpm` field in package.json is no longer read.
+# See https://pnpm.io/settings for the full schema.
+allowBuilds:
+  esbuild: true

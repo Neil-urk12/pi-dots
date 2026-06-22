@@ -416,8 +416,9 @@ describe("FooterLifecycle", () => {
 			expect(asciiInput.toksState.state).toBe("rate");
 			expect(cjkInput.toksState.state).toBe("rate");
 			// CJK should produce strictly more tokens than ASCII for same char count
-			expect((cjkInput.toksState as { value: number }).value)
-				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
+			expect((cjkInput.toksState as { value: number }).value).toBeGreaterThan(
+				(asciiInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("produces higher estimates for emoji text than same-length ASCII", () => {
@@ -441,8 +442,9 @@ describe("FooterLifecycle", () => {
 
 			expect(asciiInput.toksState.state).toBe("rate");
 			expect(emojiInput.toksState.state).toBe("rate");
-			expect((emojiInput.toksState as { value: number }).value)
-				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
+			expect((emojiInput.toksState as { value: number }).value).toBeGreaterThan(
+				(asciiInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("handles mixed ASCII and CJK text correctly", () => {
@@ -466,8 +468,9 @@ describe("FooterLifecycle", () => {
 			expect(mixedInput.toksState.state).toBe("rate");
 			expect(asciiInput.toksState.state).toBe("rate");
 			// Mixed text with CJK should produce more tokens than pure ASCII of same length
-			expect((mixedInput.toksState as { value: number }).value)
-				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
+			expect((mixedInput.toksState as { value: number }).value).toBeGreaterThan(
+				(asciiInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs CJK punctuation lower than CJK ideographs", () => {
@@ -491,8 +494,9 @@ describe("FooterLifecycle", () => {
 			expect(punctInput.toksState.state).toBe("rate");
 			expect(ideographInput.toksState.state).toBe("rate");
 			// Punctuation should weigh strictly less than ideographs
-			expect((punctInput.toksState as { value: number }).value)
-				.toBeLessThan((ideographInput.toksState as { value: number }).value);
+			expect((punctInput.toksState as { value: number }).value).toBeLessThan(
+				(ideographInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs Latin extended at 0.5 tokens per char (TOK_OTHER)", () => {
@@ -516,8 +520,9 @@ describe("FooterLifecycle", () => {
 			expect(latinInput.toksState.state).toBe("rate");
 			expect(asciiInput.toksState.state).toBe("rate");
 			// Non-ASCII scripts should weigh more than ASCII
-			expect((latinInput.toksState as { value: number }).value)
-				.toBeGreaterThan((asciiInput.toksState as { value: number }).value);
+			expect((latinInput.toksState as { value: number }).value).toBeGreaterThan(
+				(asciiInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs Halfwidth & Fullwidth Forms (0xFF00-0xFFEF) same as CJK ideographs", () => {
@@ -540,8 +545,9 @@ describe("FooterLifecycle", () => {
 
 			expect(fullwidthInput.toksState.state).toBe("rate");
 			expect(cjkInput.toksState.state).toBe("rate");
-			expect((fullwidthInput.toksState as { value: number }).value)
-				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+			expect((fullwidthInput.toksState as { value: number }).value).toBeGreaterThanOrEqual(
+				(cjkInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs Bopomofo (0x3100-0x312F) same as CJK ideographs", () => {
@@ -564,8 +570,9 @@ describe("FooterLifecycle", () => {
 
 			expect(bopomofoInput.toksState.state).toBe("rate");
 			expect(cjkInput.toksState.state).toBe("rate");
-			expect((bopomofoInput.toksState as { value: number }).value)
-				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+			expect((bopomofoInput.toksState as { value: number }).value).toBeGreaterThanOrEqual(
+				(cjkInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs Katakana Phonetic Extensions (0x31F0-0x31FF) same as CJK ideographs", () => {
@@ -588,8 +595,9 @@ describe("FooterLifecycle", () => {
 
 			expect(katakanaExtInput.toksState.state).toBe("rate");
 			expect(cjkInput.toksState.state).toBe("rate");
-			expect((katakanaExtInput.toksState as { value: number }).value)
-				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+			expect((katakanaExtInput.toksState as { value: number }).value).toBeGreaterThanOrEqual(
+				(cjkInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs CJK Radicals Supplement (0x2E80-0x2FDF) same as CJK ideographs", () => {
@@ -612,8 +620,9 @@ describe("FooterLifecycle", () => {
 
 			expect(radicalsInput.toksState.state).toBe("rate");
 			expect(cjkInput.toksState.state).toBe("rate");
-			expect((radicalsInput.toksState as { value: number }).value)
-				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+			expect((radicalsInput.toksState as { value: number }).value).toBeGreaterThanOrEqual(
+				(cjkInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs Bopomofo boundary char U+312E same as CJK ideographs", () => {
@@ -635,8 +644,9 @@ describe("FooterLifecycle", () => {
 
 			expect(bopomofoInput.toksState.state).toBe("rate");
 			expect(cjkInput.toksState.state).toBe("rate");
-			expect((bopomofoInput.toksState as { value: number }).value)
-				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+			expect((bopomofoInput.toksState as { value: number }).value).toBeGreaterThanOrEqual(
+				(cjkInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs fullwidth currency symbols (¥₩) lower than CJK ideographs", () => {
@@ -659,8 +669,9 @@ describe("FooterLifecycle", () => {
 			expect(currencyInput.toksState.state).toBe("rate");
 			expect(cjkInput.toksState.state).toBe("rate");
 			// Currency symbols should weigh LESS than CJK ideographs
-			expect((currencyInput.toksState as { value: number }).value)
-				.toBeLessThan((cjkInput.toksState as { value: number }).value);
+			expect((currencyInput.toksState as { value: number }).value).toBeLessThan(
+				(cjkInput.toksState as { value: number }).value,
+			);
 		});
 
 		it("weighs Halfwidth Katakana (0xFF65-0xFF9F) same as CJK ideographs", () => {
@@ -682,8 +693,9 @@ describe("FooterLifecycle", () => {
 
 			expect(halfwidthKataInput.toksState.state).toBe("rate");
 			expect(cjkInput.toksState.state).toBe("rate");
-			expect((halfwidthKataInput.toksState as { value: number }).value)
-				.toBeGreaterThanOrEqual((cjkInput.toksState as { value: number }).value);
+			expect((halfwidthKataInput.toksState as { value: number }).value).toBeGreaterThanOrEqual(
+				(cjkInput.toksState as { value: number }).value,
+			);
 		});
 
 		// ── Rate computation across rapid deltas ─────────────────
@@ -852,9 +864,7 @@ describe("FooterLifecycle", () => {
 
 		it("returns correct directory even before start()", () => {
 			const { lifecycle } = createLifecycle();
-			const input = lifecycle.getFooterInput(
-				makeMockCtx({ cwd: "/home/user/my-project" }),
-			);
+			const input = lifecycle.getFooterInput(makeMockCtx({ cwd: "/home/user/my-project" }));
 			expect(input.directory).toBe("my-project");
 		});
 
@@ -973,43 +983,43 @@ describe("FooterLifecycle", () => {
 		});
 	});
 
-		it("schedules git refresh for bash tool", async () => {
-			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx());
-			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+	it("schedules git refresh for bash tool", async () => {
+		const { lifecycle } = createLifecycle();
+		await lifecycle.start(makeMockCtx());
+		const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
 
-			lifecycle.onToolExecutionEnd("bash");
+		lifecycle.onToolExecutionEnd("bash");
 
-			expect(handle.schedule).toHaveBeenCalled();
-		});
+		expect(handle.schedule).toHaveBeenCalled();
+	});
 
-		it("schedules git refresh for edit tool", async () => {
-			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx());
-			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+	it("schedules git refresh for edit tool", async () => {
+		const { lifecycle } = createLifecycle();
+		await lifecycle.start(makeMockCtx());
+		const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
 
-			lifecycle.onToolExecutionEnd("edit");
+		lifecycle.onToolExecutionEnd("edit");
 
-			expect(handle.schedule).toHaveBeenCalled();
-		});
+		expect(handle.schedule).toHaveBeenCalled();
+	});
 
-		it("schedules git refresh for write tool", async () => {
-			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx());
-			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+	it("schedules git refresh for write tool", async () => {
+		const { lifecycle } = createLifecycle();
+		await lifecycle.start(makeMockCtx());
+		const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
 
-			lifecycle.onToolExecutionEnd("write");
+		lifecycle.onToolExecutionEnd("write");
 
-			expect(handle.schedule).toHaveBeenCalled();
-		});
+		expect(handle.schedule).toHaveBeenCalled();
+	});
 
-		it("does not schedule git refresh for other tools", async () => {
-			const { lifecycle } = createLifecycle();
-			await lifecycle.start(makeMockCtx());
-			const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
+	it("does not schedule git refresh for other tools", async () => {
+		const { lifecycle } = createLifecycle();
+		await lifecycle.start(makeMockCtx());
+		const handle = (createGitState as ReturnType<typeof vi.fn>).mock.results[0]?.value;
 
-			lifecycle.onToolExecutionEnd("web_search");
+		lifecycle.onToolExecutionEnd("web_search");
 
-			expect(handle.schedule).not.toHaveBeenCalled();
-		});
+		expect(handle.schedule).not.toHaveBeenCalled();
+	});
 });

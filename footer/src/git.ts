@@ -68,14 +68,20 @@ export function createGitState(options: {
 			//   numeric code → git exited non-zero (not a repo, permission denied, etc.)
 			//   anything else → unexpected runtime error, log for debugging
 			const code = (err as { code?: string | number }).code;
-			if (err instanceof Error && code != null && code !== 'ENOENT' && typeof code !== 'number') {
+			if (err instanceof Error && code != null && code !== "ENOENT" && typeof code !== "number") {
 				console.error("[clean-footer] git refresh failed:", err.message);
 			}
 			gitState = { inRepo: false, dirtyCount: 0 };
 		}
 
+		// Defensive snapshot: callbacks may unsubscribe (splice) during iteration.
+		// oxlint-disable-next-line unicorn/no-useless-spread
 		for (const cb of [...onChangeListeners]) {
-			try { cb(); } catch { /* callback must not crash refresh */ }
+			try {
+				cb();
+			} catch {
+				/* callback must not crash refresh */
+			}
 		}
 	}
 

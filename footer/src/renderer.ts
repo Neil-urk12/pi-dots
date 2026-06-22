@@ -50,7 +50,6 @@ function buildSegments(input: FooterInput, cf: ColorFn): SegmentMap {
 
 // ── Private: low-level helpers ────────────────────────────────
 
-
 // ── Private: segment formatters ───────────────────────────────
 
 function formatModelSegment(input: FooterInput, cf: ColorFn): string {

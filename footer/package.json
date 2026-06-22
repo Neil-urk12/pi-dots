@@ -34,8 +34,10 @@
     "dev": "tsup --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "format": "prettier --write \"src/**/*.ts\"",
-    "format:check": "prettier --check \"src/**/*.ts\""
+    "lint:check": "oxlint .",
+    "lint:fix": "oxlint --fix .",
+    "format": "oxfmt --write \"src/**/*.ts\"",
+    "format:check": "oxfmt --check \"src/**/*.ts\""
   },
   "peerDependencies": {
     "@earendil-works/pi-ai": "*",
@@ -46,14 +48,10 @@
     "node": ">=18"
   },
   "devDependencies": {
-    "prettier": "^3.8.3",
+    "oxfmt": "^0.55.0",
+    "oxlint": "^1.70.0",
     "tsup": "^8.5.1",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.6"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild"
-    ]
+    "vitest": "^4.1.9"
   }
 }

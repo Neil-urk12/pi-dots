@@ -20,12 +20,12 @@ export function mergeConfig(
 		...base,
 		...override,
 		modelAliases: {
-			...(base.modelAliases ?? {}),
-			...(override.modelAliases ?? {}),
+			...base.modelAliases,
+			...override.modelAliases,
 		},
 		colors: {
-			...(base.colors ?? {}),
-			...(override.colors ?? {}),
+			...base.colors,
+			...override.colors,
 		},
 	};
 }
@@ -38,9 +38,7 @@ export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoad
 	const warnings: string[] = [];
 
 	if ("showCache" in config) {
-		warnings.push(
-			"showCache is deprecated; use showCacheRead and showCacheWrites instead",
-		);
+		warnings.push("showCache is deprecated; use showCacheRead and showCacheWrites instead");
 	}
 	if ("showCache" in config && !("showCacheRead" in config)) {
 		config = { ...config, showCacheRead: config.showCache };
@@ -75,13 +73,13 @@ export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoad
 			),
 			modelAliases: {
 				...defaultConfig.modelAliases,
-				...(presetConfig.modelAliases ?? {}),
-				...(config.modelAliases ?? {}),
+				...presetConfig.modelAliases,
+				...config.modelAliases,
 			},
 			colors: {
 				...defaultConfig.colors,
-				...(presetConfig.colors ?? {}),
-				...(config.colors ?? {}),
+				...presetConfig.colors,
+				...config.colors,
 			},
 		},
 		loadedPaths: [],
@@ -89,10 +87,7 @@ export function resolveConfigWithWarnings(config: CleanFooterConfig): ConfigLoad
 	};
 }
 
-function resolvePresetId(
-	preset: CleanFooterConfig["preset"],
-	warnings: string[],
-): FooterPresetId {
+function resolvePresetId(preset: CleanFooterConfig["preset"], warnings: string[]): FooterPresetId {
 	if (preset === undefined || preset === "default") return "default";
 	if (typeof preset !== "string") {
 		warnings.push("preset must be a string; using default preset");
@@ -197,7 +192,5 @@ function positiveNumber(val: unknown, fallback: number): number {
 }
 
 function percentNumber(val: unknown, fallback: number): number {
-	return typeof val === "number" && Number.isFinite(val) && val >= 0 && val <= 100
-		? val
-		: fallback;
+	return typeof val === "number" && Number.isFinite(val) && val >= 0 && val <= 100 ? val : fallback;
 }

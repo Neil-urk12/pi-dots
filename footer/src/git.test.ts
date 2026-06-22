@@ -35,7 +35,12 @@ import { createGitState } from "./git.js";
 
 function mockGitSuccess(branch: string, porcelain: string) {
 	mockExecFile.mockImplementation(
-		(_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+		(
+			_cmd: string,
+			args: string[],
+			_opts: unknown,
+			cb: (err: Error | null, stdout: string, stderr: string) => void,
+		) => {
 			if (args.includes("--show-current")) {
 				cb(null, branch + "\n", "");
 			} else if (args.includes("--porcelain")) {
@@ -49,7 +54,12 @@ function mockGitSuccess(branch: string, porcelain: string) {
 
 function mockGitFailure() {
 	mockExecFile.mockImplementation(
-		(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+		(
+			_cmd: string,
+			_args: string[],
+			_opts: unknown,
+			cb: (err: Error | null, stdout: string, stderr: string) => void,
+		) => {
 			cb(new Error("not a git repo"), "", "");
 		},
 	);
@@ -116,7 +126,12 @@ describe("createGitState", () => {
 			// Second refresh: fast, succeeds
 			let firstCallback: ((err: Error | null, stdout: string, stderr: string) => void) | undefined;
 			mockExecFile.mockImplementation(
-				(_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+				(
+					_cmd: string,
+					args: string[],
+					_opts: unknown,
+					cb: (err: Error | null, stdout: string, stderr: string) => void,
+				) => {
 					if (args.includes("--show-current")) {
 						if (!firstCallback) {
 							firstCallback = cb;
@@ -154,7 +169,12 @@ describe("createGitState", () => {
 			const exitError = new Error("Command failed: git branch") as Error & { code: number };
 			exitError.code = 128;
 			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+				(
+					_cmd: string,
+					_args: string[],
+					_opts: unknown,
+					cb: (err: Error | null, stdout: string, stderr: string) => void,
+				) => {
 					cb(exitError, "", "");
 				},
 			);
@@ -178,7 +198,12 @@ describe("createGitState", () => {
 			const eaccesError = new Error("spawn git EACCES") as Error & { code: string };
 			eaccesError.code = "EACCES";
 			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+				(
+					_cmd: string,
+					_args: string[],
+					_opts: unknown,
+					cb: (err: Error | null, stdout: string, stderr: string) => void,
+				) => {
 					cb(eaccesError, "", "");
 				},
 			);
@@ -221,7 +246,12 @@ describe("createGitState", () => {
 			// First refresh: slow (uses a delayed callback)
 			let firstCallback: ((err: Error | null, stdout: string, stderr: string) => void) | undefined;
 			mockExecFile.mockImplementation(
-				(_cmd: string, args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+				(
+					_cmd: string,
+					args: string[],
+					_opts: unknown,
+					cb: (err: Error | null, stdout: string, stderr: string) => void,
+				) => {
 					if (args.includes("--show-current")) {
 						if (!firstCallback) {
 							// First call: hold the callback
@@ -269,7 +299,12 @@ describe("createGitState", () => {
 		it("logs errors with unexpected code (EACCES) to console.error", async () => {
 			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+				(
+					_cmd: string,
+					_args: string[],
+					_opts: unknown,
+					cb: (err: Error | null, stdout: string, stderr: string) => void,
+				) => {
 					const err = new Error("spawn git EACCES") as Error & { code: string };
 					err.code = "EACCES";
 					cb(err, "", "");
@@ -298,7 +333,12 @@ describe("createGitState", () => {
 			const enoentError = new Error("git: command not found") as Error & { code: string };
 			enoentError.code = "ENOENT";
 			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+				(
+					_cmd: string,
+					_args: string[],
+					_opts: unknown,
+					cb: (err: Error | null, stdout: string, stderr: string) => void,
+				) => {
 					cb(enoentError, "", "");
 				},
 			);
@@ -319,11 +359,19 @@ describe("createGitState", () => {
 
 		it("silences timeout errors (code: null)", async () => {
 			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-			const timeoutError = new Error("Command failed: git branch") as Error & { code: null; killed: boolean };
+			const timeoutError = new Error("Command failed: git branch") as Error & {
+				code: null;
+				killed: boolean;
+			};
 			timeoutError.code = null;
 			timeoutError.killed = true;
 			mockExecFile.mockImplementation(
-				(_cmd: string, _args: string[], _opts: unknown, cb: (err: Error | null, stdout: string, stderr: string) => void) => {
+				(
+					_cmd: string,
+					_args: string[],
+					_opts: unknown,
+					cb: (err: Error | null, stdout: string, stderr: string) => void,
+				) => {
 					cb(timeoutError, "", "");
 				},
 			);
