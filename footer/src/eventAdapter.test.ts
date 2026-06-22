@@ -26,7 +26,6 @@ vi.mock("./git.js", () => {
 					listeners.length = 0;
 				}),
 				refresh: fakeRefresh,
-				onChange: vi.fn(),
 			};
 		}),
 	};
