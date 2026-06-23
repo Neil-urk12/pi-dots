@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.3
+
+### Features
+
+- **Provider model caching** — models now load instantly from disk cache on startup, with background refresh when stale (24-hour TTL)
+- Shared cache module (`lib/provider-cache.ts`) with load/save/freshness-check API
+- Cache stored at `~/.pi/cache/<providerId>-models.json`, separate from config
+- Graceful degradation: stale cache preferred over empty/error state, corrupt cache treated as cache miss
+
+## 1.0.2
+
+### Fixes
+
+- Fallback apiKey to placeholder when unset
+- Cap maxTokens to prevent context length errors
+
 ## 1.0.0
 
 Initial release.

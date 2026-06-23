@@ -12,6 +12,12 @@ import type { Api, Model, OAuthCredentials } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { getKiloShowPaid, saveConfig } from "../config.ts";
 import { isFreeModel, registerWithGlobalToggle } from "../lib/registry.ts";
+import {
+	loadProviderCache,
+	saveProviderCache,
+	isProviderCacheFresh,
+	DEFAULT_CACHE_TTL_MS,
+} from "../lib/provider-cache.ts";
 import { logWarning } from "../lib/util.ts";
 import { fetchKiloModels, KILO_GATEWAY_BASE } from "./kilo-models.ts";
 import { loginKilo, refreshKiloToken } from "./kilo-auth.ts";
@@ -22,18 +28,28 @@ export default async function kiloProvider(pi: ExtensionAPI) {
 	let allModels: ProviderModelConfig[] = [];
 	let freeModels: ProviderModelConfig[] = [];
 
-	// Fetch models at startup
-	try {
-		allModels = await fetchKiloModels({ freeOnly: false });
-		freeModels = allModels.filter((m) => isFreeModel({ ...m, provider: PROVIDER_KILO }, allModels));
-	} catch (error) {
-		logWarning("kilo", "Failed to fetch models at startup", error);
+	// Fetch models at startup (cache-first)
+	const cachedModels = loadProviderCache(PROVIDER_KILO);
+	if (cachedModels && cachedModels.length > 0) {
+		allModels = cachedModels;
+	} else {
 		try {
-			freeModels = await fetchKiloModels({ freeOnly: true });
-		} catch (e) {
-			logWarning("kilo", "Failed to fetch free models", e);
+			allModels = await fetchKiloModels({ freeOnly: false });
+			if (allModels.length > 0) {
+				saveProviderCache(PROVIDER_KILO, allModels).catch((err) => {
+					logWarning("kilo", "Failed to save model cache", err);
+				});
+			}
+		} catch (error) {
+			logWarning("kilo", "Failed to fetch models at startup", error);
+			try {
+				freeModels = await fetchKiloModels({ freeOnly: true });
+			} catch (e) {
+				logWarning("kilo", "Failed to fetch free models", e);
+			}
 		}
 	}
+	freeModels = allModels.filter((m) => isFreeModel({ ...m, provider: PROVIDER_KILO }, allModels));
 
 	const kiloShowPaid = getKiloShowPaid();
 	let showPaidModels = kiloShowPaid;
@@ -183,30 +199,43 @@ export default async function kiloProvider(pi: ExtensionAPI) {
 		}
 	});
 
-	// Refresh models on session start if authenticated
+	// Refresh models on session start (background, non-blocking)
+	let refreshInFlight: Promise<void> | undefined;
 	pi.on("session_start", async (_event, ctx) => {
-		const cred = ctx.modelRegistry.authStorage.get(PROVIDER_KILO);
+		if (refreshInFlight) return;
 
-		if (cred?.type === "oauth") {
+		const cred = ctx.modelRegistry.authStorage.get(PROVIDER_KILO);
+		const isAuth = cred?.type === "oauth";
+		const cacheStale = !isProviderCacheFresh(PROVIDER_KILO, DEFAULT_CACHE_TTL_MS);
+
+		// Skip if cache is fresh and not authenticated (nothing to refresh)
+		if (!isAuth && !cacheStale) return;
+
+		refreshInFlight = (async () => {
 			try {
 				const newModels = await fetchKiloModels({
-					token: cred.access,
+					token: isAuth ? cred.access : undefined,
 					freeOnly: false,
 				});
-				allModels = newModels;
-				stored.all = allModels;
-				freeModels = allModels.filter((m) => isFreeModel({ ...m, provider: PROVIDER_KILO }, allModels));
-				stored.free = freeModels;
+				if (newModels.length > 0) {
+					allModels = newModels;
+					stored.all = allModels;
+					freeModels = allModels.filter((m) =>
+						isFreeModel({ ...m, provider: PROVIDER_KILO }, allModels),
+					);
+					stored.free = freeModels;
+					await saveProviderCache(PROVIDER_KILO, allModels);
 
-				registerWithGlobalToggle(PROVIDER_KILO, stored, reRegister, true);
+					registerWithGlobalToggle(PROVIDER_KILO, stored, reRegister, isAuth);
 
-				if (showPaidModels) {
-					reRegister(allModels);
+					reRegister(showPaidModels ? allModels : freeModels);
 				}
 			} catch (error) {
 				logWarning("kilo", "Failed to refresh models at session start", error);
+			} finally {
+				refreshInFlight = undefined;
 			}
-		}
+		})();
 	});
 }
 

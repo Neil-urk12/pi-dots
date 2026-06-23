@@ -10,6 +10,12 @@
 
 import type { ExtensionAPI, ProviderModelConfig } from "@earendil-works/pi-coding-agent";
 import { getOpencodeApiKey, getOpencodeShowPaid, saveConfig } from "../config.ts";
+import {
+	loadProviderCache,
+	saveProviderCache,
+	isProviderCacheFresh,
+	DEFAULT_CACHE_TTL_MS,
+} from "../lib/provider-cache.ts";
 import { isFreeModel, registerWithGlobalToggle } from "../lib/registry.ts";
 import { logWarning } from "../lib/util.ts";
 import { createOpenCodeStreamSimple, createOpenCodeSessionTracker } from "./opencode-session.ts";
@@ -81,15 +87,26 @@ export default async function opencodeProvider(pi: ExtensionAPI) {
 		let allModels: ProviderModelConfig[] = [];
 		let freeModels: ProviderModelConfig[] = [];
 
-		try {
-			allModels = await fetchOpenCodeModels(baseUrl, apiKey);
-			freeModels = allModels.filter((m) =>
-				isFreeModel({ ...m, provider: providerId, _pricingKnown: false }, allModels),
-			);
-		} catch (error) {
-			logWarning(providerId, "Failed to fetch models at startup", error);
-			continue;
+		// Cache-first startup
+		const cachedModels = loadProviderCache(providerId);
+		if (cachedModels && cachedModels.length > 0) {
+			allModels = cachedModels;
+		} else {
+			try {
+				allModels = await fetchOpenCodeModels(baseUrl, apiKey);
+				if (allModels.length > 0) {
+					saveProviderCache(providerId, allModels).catch((err) => {
+						logWarning(providerId, "Failed to save model cache", err);
+					});
+				}
+			} catch (error) {
+				logWarning(providerId, "Failed to fetch models at startup", error);
+				continue;
+			}
 		}
+		freeModels = allModels.filter((m) =>
+			isFreeModel({ ...m, provider: providerId, _pricingKnown: false }, allModels),
+		);
 
 		if (allModels.length === 0) continue;
 
@@ -143,6 +160,42 @@ export default async function opencodeProvider(pi: ExtensionAPI) {
 			ctx.ui.setStatus(`${pid}-status`, `${status} 🔑`);
 		});
 	}
+
+	// Refresh stale cache in background on session start
+	let refreshInFlight: Promise<void> | undefined;
+	pi.on("session_start", () => {
+		if (refreshInFlight) return;
+		const anyStale = OPENCODE_BASES.some(
+			({ providerId }) => !isProviderCacheFresh(providerId, DEFAULT_CACHE_TTL_MS),
+		);
+		if (anyStale) {
+			refreshInFlight = (async () => {
+				try {
+					for (const { providerId, baseUrl } of OPENCODE_BASES) {
+						const fresh = await fetchOpenCodeModels(baseUrl, apiKey);
+						if (fresh.length > 0) {
+							await saveProviderCache(providerId, fresh);
+							const entry = getProviderRegistry().get(providerId);
+							if (entry) {
+								const free = fresh.filter((m) =>
+									isFreeModel({ ...m, provider: providerId, _pricingKnown: false }, fresh),
+								);
+								entry.stored.all = fresh;
+								entry.stored.free = free;
+
+								const showPaid = getOpencodeShowPaid();
+								entry.reRegister(showPaid ? fresh : free);
+							}
+						}
+					}
+				} catch (err) {
+					logWarning("opencode", "Failed to refresh cache at session start", err);
+				} finally {
+					refreshInFlight = undefined;
+				}
+			})();
+		}
+	});
 
 	// Shared toggle command for both opencode and opencode-go
 	pi.registerCommand("toggle-opencode", {
