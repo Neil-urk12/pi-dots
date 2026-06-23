@@ -101,6 +101,28 @@ describe("mapOpenRouterModel", () => {
 		expect(result.cost.input).toBe(0);
 		expect(result.cost.output).toBe(0);
 	});
+
+	it("caps maxTokens to 16384 when it equals or exceeds contextWindow and maxTokens > 16384", () => {
+		const result = mapOpenRouterModel({
+			id: "stepfun/step-3.7-flash:free",
+			name: "Step 3.7 Flash",
+			context_length: 262144,
+			max_completion_tokens: 262144,
+		});
+		expect(result.contextWindow).toBe(262144);
+		expect(result.maxTokens).toBe(16384);
+	});
+
+	it("does not cap maxTokens when maxTokens <= 16384 even if it equals or exceeds contextWindow", () => {
+		const result = mapOpenRouterModel({
+			id: "m",
+			name: "m",
+			context_length: 4096,
+			max_completion_tokens: 4096,
+		});
+		expect(result.contextWindow).toBe(4096);
+		expect(result.maxTokens).toBe(4096);
+	});
 });
 
 // =============================================================================
@@ -128,7 +150,8 @@ describe("fetchWithRetry", () => {
 	it("retries on 500 errors", async () => {
 		const failResponse = { ok: false, status: 500 } as Response;
 		const okResponse = { ok: true, status: 200 } as Response;
-		vi.spyOn(globalThis, "fetch")
+		vi
+			.spyOn(globalThis, "fetch")
 			.mockResolvedValueOnce(failResponse)
 			.mockResolvedValueOnce(okResponse);
 

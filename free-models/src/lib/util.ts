@@ -115,6 +115,12 @@ export function mapOpenRouterModel(m: {
 }): ProviderModelConfig {
 	const promptPrice = Number.parseFloat(m.pricing?.prompt ?? "0");
 	const completionPrice = Number.parseFloat(m.pricing?.completion ?? "0");
+	const contextWindow = m.context_length ?? 4096;
+	let maxTokens = m.max_completion_tokens ?? m.top_provider?.max_completion_tokens ?? 4096;
+
+	if (maxTokens > 16384 && maxTokens >= contextWindow) {
+		maxTokens = 16384;
+	}
 
 	return {
 		id: m.id,
@@ -129,8 +135,8 @@ export function mapOpenRouterModel(m: {
 			cacheRead: 0,
 			cacheWrite: 0,
 		},
-		contextWindow: m.context_length ?? 4096,
-		maxTokens: m.max_completion_tokens ?? m.top_provider?.max_completion_tokens ?? 4096,
+		contextWindow,
+		maxTokens,
 		_pricingKnown: true,
 	};
 }

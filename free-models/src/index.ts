@@ -13,7 +13,13 @@
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createLogger } from "./lib/logger.ts";
-import { applyGlobalFilter, getGlobalFreeOnly, getProviderRegistry } from "./lib/registry.ts";
+import {
+	applyGlobalFilter,
+	getGlobalFreeOnly,
+	getProviderRegistry,
+	isFreeModel,
+	registerWithGlobalToggle,
+} from "./lib/registry.ts";
 import kilo from "./providers/kilo.ts";
 import opencode from "./providers/opencode.ts";
 
