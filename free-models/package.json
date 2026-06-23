@@ -1,6 +1,6 @@
 {
 	"name": "@neilurk12/pi-free-models",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"type": "module",
 	"description": "Free model providers for Pi — Kilo and OpenCode with free/paid filtering",
 	"main": "./dist/index.js",
