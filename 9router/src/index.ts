@@ -103,7 +103,13 @@ export default async function (pi: ExtensionAPI) {
   pi.registerProvider(PROVIDER_NAME, {
     name: "9Router",
     baseUrl: `${baseUrl}/v1`,
-    apiKey,
+    // pi's `registerProvider` validator rejects `apiKey: undefined` AND `apiKey: ""`
+    // (model-registry.js:679: `if (!config.apiKey && !config.oauth) throw`).
+    // `resolveApiKey` falls through an unset env var to the config file, which may
+    // hold an empty string. Use `||` (not `??`) so both cases land on the placeholder.
+    // 9Router with `requireApiKey=false` (the default) accepts any non-empty Bearer
+    // and ignores it; for auth-enabled 9Router, set NINEROUTER_KEY.
+    apiKey: apiKey || "no-auth",
     api: "openai-completions",
     models: chatModels.map((m) => ({
       id: m.id,
