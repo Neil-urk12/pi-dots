@@ -1,0 +1,42 @@
+{
+  "name": "@neilurk12/pi-9router",
+  "version": "0.1.0",
+  "description": "9Router AI model provider extension for pi coding agent",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "provider",
+    "9router"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Neil-urk12/pi-dots.git"
+  },
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "pi": {
+    "extensions": [
+      "./dist/index.js"
+    ]
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3"
+  }
+}
