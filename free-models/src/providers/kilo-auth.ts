@@ -31,6 +31,7 @@ interface OAuthCredentials {
 	refresh: string;
 	access: string;
 	expires: number;
+	[key: string]: unknown;
 }
 
 interface OAuthLoginCallbacks {
