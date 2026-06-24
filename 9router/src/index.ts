@@ -72,6 +72,78 @@ function isChatModel(m: NineRouterModel): boolean {
   return !m.kind || m.kind === "chat";
 }
 
+function getNineRouterModelContextWindow(modelId: string): number {
+  const id = modelId.toLowerCase();
+  const baseId = id.split("/").pop() ?? id;
+
+  // 1. Gemini models:
+  // gemini-3.1-pro-preview -> 2M
+  if (baseId.includes("gemini-3.1-pro") || baseId.includes("gemini-3-pro") || baseId.includes("gemini-pro")) {
+    return 2_000_000;
+  }
+  // gemini-3.5-flash, gemini-3.1-flash, gemini-3-flash, etc. -> 1M
+  if (baseId.includes("gemini-")) {
+    return 1_000_000;
+  }
+
+  // 2. Claude models:
+  // claude-opus, claude-sonnet, claude-haiku -> 200k
+  if (baseId.includes("claude-")) {
+    return 200_000;
+  }
+
+  // 3. GLM (Zhipu) models:
+  // GLM-5, GLM-5.1, GLM-5.2 -> 1M
+  if (baseId.includes("glm-5")) {
+    return 1_000_000;
+  }
+
+  // 4. Kimi models:
+  // kimi-k2.7-code, kimi-k2.6, kimi-k2.5, etc. -> 1M
+  if (baseId.includes("kimi-k2") || baseId.includes("kimi-for-coding")) {
+    return 1_000_000;
+  }
+
+  // 5. MiniMax models:
+  // minimax-m3, MiniMax-M3, MiniMax-M2.7 -> 1M
+  if (baseId.includes("minimax-m3") || baseId.includes("minimax-m2.7")) {
+    return 1_000_000;
+  }
+
+  // 6. Qwen models:
+  // qwen3.6-plus, qwen3.6-flash, qwen3.7-max, qwen3-max -> 1M
+  if (
+    baseId.includes("qwen3.6-plus") ||
+    baseId.includes("qwen3.6-flash") ||
+    baseId.includes("qwen3.7-max") ||
+    baseId.includes("qwen3-max")
+  ) {
+    return 1_000_000;
+  }
+
+  // 7. Nemotron models:
+  // nemotron-3-ultra -> 1M
+  if (baseId.includes("nemotron-3-ultra")) {
+    return 1_000_000;
+  }
+
+  // 8. DeepSeek Flash & Xiaomi Mimo:
+  // deepseek-v4-flash, mimo-v2.5, north-mini-code -> 256k
+  if (
+    baseId.includes("deepseek-v4-flash") ||
+    baseId.includes("mimo-v2.5") ||
+    baseId.includes("mimo-v2-flash") ||
+    baseId.includes("mimo-v2-omni") ||
+    baseId.includes("mimo-v2-pro") ||
+    baseId.includes("north-mini-code")
+  ) {
+    return 256_000;
+  }
+
+  // Default fallback for other models
+  return 128_000;
+}
+
 export default async function (pi: ExtensionAPI) {
   const config = loadConfig();
   const baseUrl = resolveBaseUrl(config);
@@ -117,7 +189,7 @@ export default async function (pi: ExtensionAPI) {
       reasoning: true,
       input: ["text"] as const,
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 128_000,
+      contextWindow: getNineRouterModelContextWindow(m.id),
       maxTokens: 8_192,
     })),
   });
