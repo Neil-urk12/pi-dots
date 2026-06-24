@@ -5,7 +5,9 @@ import { describe, it, expect } from "vitest";
 import { isFreeModel } from "./registry.ts";
 import type { ProviderModelConfig } from "./types.ts";
 
-function makeModel(overrides: Partial<ProviderModelConfig & { provider?: string; _pricingKnown?: boolean }> = {}): ProviderModelConfig & { provider?: string; _pricingKnown?: boolean } {
+function makeModel(
+	overrides: Partial<ProviderModelConfig & { provider?: string; _pricingKnown?: boolean }> = {},
+): ProviderModelConfig & { provider?: string; _pricingKnown?: boolean } {
 	return {
 		id: "test-model",
 		name: "test-model",
@@ -72,8 +74,16 @@ describe("isFreeModel — Route A (pricing-exposed)", () => {
 // =============================================================================
 describe("isFreeModel — Route B (non-pricing-exposed)", () => {
 	const allModelsNoPricing = [
-		makeModel({ id: "model-a", name: "model-a", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }),
-		makeModel({ id: "model-b", name: "model-b", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }),
+		makeModel({
+			id: "model-a",
+			name: "model-a",
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		}),
+		makeModel({
+			id: "model-b",
+			name: "model-b",
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		}),
 	];
 
 	it("detects free model by name in non-pricing provider", () => {

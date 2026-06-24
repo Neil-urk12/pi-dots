@@ -15,7 +15,7 @@ vi.mock("node:fs", () => ({
 }));
 
 // Import after mock setup
-import { appendToFile, MAX_LOG_BYTES, LOG_PATH, _resetRotationGuard } from './logger.ts';
+import { appendToFile, MAX_LOG_BYTES, LOG_PATH, _resetRotationGuard } from "./logger.ts";
 
 describe("logger rotation", () => {
 	beforeEach(() => {

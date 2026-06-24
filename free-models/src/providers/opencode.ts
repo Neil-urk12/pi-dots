@@ -17,7 +17,7 @@ import {
 	DEFAULT_CACHE_TTL_MS,
 } from "../lib/provider-cache.ts";
 import { isFreeModel, registerWithGlobalToggle } from "../lib/registry.ts";
-import { logWarning } from "../lib/util.ts";
+import { logWarning, getOpenCodeModelContextWindow } from "../lib/util.ts";
 import { createOpenCodeStreamSimple, createOpenCodeSessionTracker } from "./opencode-session.ts";
 
 const OPENCODE_BASES = [
@@ -65,7 +65,7 @@ async function fetchOpenCodeModels(
 		reasoning: false,
 		input: ["text"] as ("text" | "image")[],
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-		contextWindow: 128_000,
+		contextWindow: getOpenCodeModelContextWindow(m.id),
 		maxTokens: 16_384,
 		_pricingKnown: false,
 	}));

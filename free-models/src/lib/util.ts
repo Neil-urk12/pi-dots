@@ -174,3 +174,24 @@ export async function parseModelResponse<T>(
 export function logWarning(provider: string, message: string, error?: unknown): void {
 	_logger.warn(`[${provider}] ${message}`, error ? { error: String(error) } : undefined);
 }
+
+// =============================================================================
+// OpenCode Model Context Windows
+// =============================================================================
+
+const OPENCODE_FREE_CONTEXT_LIMITS: Record<string, number> = {
+	"deepseek-v4-flash-free": 256000,
+	"mimo-v2.5-free": 256000,
+	"north-mini-code-free": 256000,
+	"qwen3.6-plus-free": 1000000,
+	"minimax-m3-free": 1048576,
+	"nemotron-3-ultra-free": 1000000,
+};
+
+/**
+ * Get accurate context window limit for OpenCode free models.
+ */
+export function getOpenCodeModelContextWindow(modelId: string): number {
+	const id = modelId.toLowerCase();
+	return OPENCODE_FREE_CONTEXT_LIMITS[id] ?? 128000;
+}

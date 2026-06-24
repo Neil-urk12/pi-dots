@@ -2,7 +2,12 @@
  * Tests for shared utility functions.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanModelName, mapOpenRouterModel, fetchWithRetry } from "./util.ts";
+import {
+	cleanModelName,
+	mapOpenRouterModel,
+	fetchWithRetry,
+	getOpenCodeModelContextWindow,
+} from "./util.ts";
 
 // =============================================================================
 // cleanModelName
@@ -184,5 +189,48 @@ describe("fetchWithRetry", () => {
 		vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("Network failure"));
 
 		await expect(fetchWithRetry("https://example.com", {}, 2, 10)).rejects.toThrow("Network failure");
+	});
+});
+
+// =============================================================================
+// getOpenCodeModelContextWindow
+// =============================================================================
+describe("getOpenCodeModelContextWindow", () => {
+	it("maps deepseek-v4-flash-free to 256000", () => {
+		expect(getOpenCodeModelContextWindow("deepseek-v4-flash-free")).toBe(256000);
+	});
+
+	it("maps mimo-v2.5-free to 256000", () => {
+		expect(getOpenCodeModelContextWindow("mimo-v2.5-free")).toBe(256000);
+	});
+
+	it("maps north-mini-code-free to 256000", () => {
+		expect(getOpenCodeModelContextWindow("north-mini-code-free")).toBe(256000);
+	});
+
+	it("maps qwen3.6-plus-free to 1000000", () => {
+		expect(getOpenCodeModelContextWindow("qwen3.6-plus-free")).toBe(1000000);
+	});
+
+	it("maps minimax-m3-free to 1048576", () => {
+		expect(getOpenCodeModelContextWindow("minimax-m3-free")).toBe(1048576);
+	});
+
+	it("maps nemotron-3-ultra-free to 1000000", () => {
+		expect(getOpenCodeModelContextWindow("nemotron-3-ultra-free")).toBe(1000000);
+	});
+
+	it("handles mixed case or uppercase model IDs case-insensitively", () => {
+		expect(getOpenCodeModelContextWindow("DeepSeek-V4-Flash-Free")).toBe(256000);
+		expect(getOpenCodeModelContextWindow("QWEN3.6-PLUS-FREE")).toBe(1000000);
+	});
+
+	it("defaults other models to 128000", () => {
+		expect(getOpenCodeModelContextWindow("claude-fable-5")).toBe(128000);
+		expect(getOpenCodeModelContextWindow("some-unknown-model-free")).toBe(128000);
+	});
+
+	it("does not match loose substring extensions", () => {
+		expect(getOpenCodeModelContextWindow("deepseek-v4-flash-free-extended")).toBe(128000);
 	});
 });
