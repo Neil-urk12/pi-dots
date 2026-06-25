@@ -19,7 +19,7 @@ function makeBypassKey(toolName: string, input: unknown): string {
 }
 
 /** Extract command string from input for prefix matching */
-function commandFromInput(input: unknown): string {
+export function commandFromInput(input: unknown): string {
   if (!input || typeof input !== "object") return "";
   const value = (input as { command?: unknown }).command;
   return typeof value === "string" ? value.trim() : "";

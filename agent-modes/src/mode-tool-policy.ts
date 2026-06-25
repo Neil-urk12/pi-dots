@@ -1,5 +1,6 @@
 import type { BashPolicy, ModeDefinition, PermissionAction, BashPatternConfig, ResolvedBashPatterns, BashPatternSeverity } from "./types.js";
 import { DELEGATION_TOOLS } from "./types.js";
+import { commandFromInput } from "./mode-bypass.js";
 
 export type ModeCatalogMap = Map<string, { 
   enabled_tools?: string[]; 
@@ -479,12 +480,6 @@ export function evaluateToolCall({
   }
 
   return { block: false, suggestedModes };
-}
-
-function commandFromInput(input: unknown): string {
-  if (!input || typeof input !== "object") return "";
-  const value = (input as { command?: unknown }).command;
-  return typeof value === "string" ? value : "";
 }
 
 /** Extract agent name(s) from subagent/Agent tool input. */

@@ -9,14 +9,7 @@ import type { ModeDefinition, BashPatternConfig } from "./types.js";
 import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE, DEFAULT_MODE, SAFE_FALLBACK_MODES, DELEGATION_TOOLS } from "./types.js";
 import { PiModeEffects } from "./mode-effects.js";
 import { PiModeDialogs } from "./mode-dialogs.js";
-import { OneShotBypass } from "./mode-bypass.js";
-
-/** Extract command string from input for prefix matching */
-function commandFromInput(input: unknown): string {
-  if (!input || typeof input !== "object") return "";
-  const value = (input as { command?: unknown }).command;
-  return typeof value === "string" ? value.trim() : "";
-}
+import { OneShotBypass, commandFromInput } from "./mode-bypass.js";
 
 export interface ModeSelectOption {
   name: string;
