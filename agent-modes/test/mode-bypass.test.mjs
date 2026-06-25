@@ -70,7 +70,6 @@ describe("OneShotBypass", () => {
     bypass.grantSession("bash");
 
     expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
-    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
     expect(bypass.checkAndConsume("bash", { command: "git status" })).toBe(true);
     expect(bypass.checkAndConsume("write", { path: "test.ts" })).toBe(false);
   });
@@ -79,7 +78,6 @@ describe("OneShotBypass", () => {
     const bypass = new OneShotBypass();
     bypass.grantSession("bash");
 
-    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
     expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
     expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
   });
@@ -91,5 +89,107 @@ describe("OneShotBypass", () => {
 
     bypass.clear();
     expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(false);
+  });
+});
+
+describe("Prefix bypass (one-shot)", () => {
+  it("should grant prefix bypass and match commands starting with the prefix", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "npm install --save-dev" })).toBe(true);
+  });
+
+  it("should grant prefix bypass for multiple calls when using session prefix", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSessionPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "npm install --save-dev" })).toBe(true);
+    expect(bypass.checkAndConsume("bash", { command: "npm install -g typescript" })).toBe(true);
+  });
+
+  it("should not match commands that do not start with the prefix", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "npm run build" })).toBe(false);
+    expect(bypass.checkAndConsume("bash", { command: "git commit" })).toBe(false);
+  });
+
+  it("should consume prefix bypass after first match (one-shot)", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "npm install --save-dev" })).toBe(true);
+    expect(bypass.checkAndConsume("bash", { command: "npm install --save-dev" })).toBe(false);
+  });
+
+  it("should be case-sensitive for prefix matching", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "NPM INSTALL --save" })).toBe(false);
+  });
+
+  it("should trim whitespace before matching", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantPrefix("bash", "  npm install  ");
+
+    expect(bypass.checkAndConsume("bash", { command: "npm install --save-dev" })).toBe(true);
+  });
+
+  it("should trim whitespace in command input before matching", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSessionPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "  npm install --save-dev  " })).toBe(true);
+  });
+
+  it("should match exact command with prefix grant (not just longer commands)", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "npm install" })).toBe(true);
+  });
+
+  it("should only work for the granted tool", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("write", { command: "npm install" })).toBe(false);
+  });
+});
+
+describe("Prefix bypass (session)", () => {
+  it("should grant session prefix bypass and persist across calls", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSessionPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "npm install --save-dev" })).toBe(true);
+    expect(bypass.checkAndConsume("bash", { command: "npm install -g typescript" })).toBe(true);
+    expect(bypass.checkAndConsume("bash", { command: "npm install" })).toBe(true);
+  });
+
+  it("should not consume session prefix grants (they persist)", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSessionPrefix("bash", "npm install");
+
+    bypass.checkAndConsume("bash", { command: "npm install --save-dev" });
+    expect(bypass.checkAndConsume("bash", { command: "npm install --save-dev" })).toBe(true);
+  });
+
+  it("should not match non-prefix commands", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSessionPrefix("bash", "npm install");
+
+    expect(bypass.checkAndConsume("bash", { command: "npm run build" })).toBe(false);
+  });
+
+  it("should clear session prefix grants when clear is called", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSessionPrefix("bash", "npm install");
+
+    bypass.clear();
+    expect(bypass.checkAndConsume("bash", { command: "npm install --save-dev" })).toBe(false);
   });
 });

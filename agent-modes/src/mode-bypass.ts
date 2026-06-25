@@ -18,11 +18,20 @@ function makeBypassKey(toolName: string, input: unknown): string {
   return `${toolName}:${args}`;
 }
 
+/** Extract command string from input for prefix matching */
+function commandFromInput(input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const value = (input as { command?: unknown }).command;
+  return typeof value === "string" ? value.trim() : "";
+}
+
 const DEFAULT_MAX_SIZE = 100;
 
 export class OneShotBypass {
   private readonly bypasses = new Set<string>();
   private readonly sessionGrants = new Set<string>();
+  private readonly prefixBypasses = new Map<string, string>();      // key → prefix
+  private readonly sessionPrefixGrants = new Map<string, string>(); // key → prefix
   private readonly maxSize: number;
 
   constructor({ maxSize = DEFAULT_MAX_SIZE }: { maxSize?: number } = {}) {
@@ -34,11 +43,30 @@ export class OneShotBypass {
     if (this.sessionGrants.has(toolName)) {
       return true;
     }
-    const key = makeBypassKey(toolName, input);
-    if (this.bypasses.has(key)) {
-      this.bypasses.delete(key);
+
+    // Session prefix grants allow matching commands (not consumed)
+    const command = commandFromInput(input);
+    for (const [key, prefix] of this.sessionPrefixGrants) {
+      if (toolName === key.split(":")[0] && command.startsWith(prefix)) {
+        return true;
+      }
+    }
+
+    // One-shot exact bypass (consumed)
+    const bypassKey = makeBypassKey(toolName, input);
+    if (this.bypasses.has(bypassKey)) {
+      this.bypasses.delete(bypassKey);
       return true;
     }
+
+    // One-shot prefix bypass (consumed on match)
+    for (const [key, prefix] of this.prefixBypasses) {
+      if (key.startsWith(`${toolName}:`) && command.startsWith(prefix)) {
+        this.prefixBypasses.delete(key);
+        return true;
+      }
+    }
+
     return false;
   }
 
@@ -54,8 +82,20 @@ export class OneShotBypass {
     this.sessionGrants.add(toolName);
   }
 
+  grantPrefix(toolName: string, command: string): void {
+    const key = `${toolName}:${command.trim()}`;
+    this.prefixBypasses.set(key, command.trim());
+  }
+
+  grantSessionPrefix(toolName: string, command: string): void {
+    const key = `${toolName}:${command.trim()}`;
+    this.sessionPrefixGrants.set(key, command.trim());
+  }
+
   clear(): void {
     this.bypasses.clear();
     this.sessionGrants.clear();
+    this.prefixBypasses.clear();
+    this.sessionPrefixGrants.clear();
   }
 }

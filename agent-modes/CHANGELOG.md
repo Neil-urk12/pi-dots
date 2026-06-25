@@ -5,6 +5,7 @@ All notable changes to this project will be documented in this file.
 ## [0.4.0] - 2026-06-26
 
 ### Added
+- **Smart bash allow with prefix matching**: When a bash command is blocked by mode policy, users can now choose "Allow once (prefix)" or "Allow for session (prefix)" to allow commands starting with the same prefix. For example, allowing `npm install` will also permit `npm install --save-dev`. Case-sensitive, whitespace-trimmed.
 - **Session-level tool bypass**: When a tool call is blocked by mode policy, users can now choose "Allow for rest of session" to permit the tool for all subsequent calls without switching modes. Unlike "Allow once" which is consumed after one use, session grants persist until the session ends or `clear()` is called.
 
 ## [0.2.0] - 2026-06-02

@@ -11,6 +11,13 @@ import { PiModeEffects } from "./mode-effects.js";
 import { PiModeDialogs } from "./mode-dialogs.js";
 import { OneShotBypass } from "./mode-bypass.js";
 
+/** Extract command string from input for prefix matching */
+function commandFromInput(input: unknown): string {
+  if (!input || typeof input !== "object") return "";
+  const value = (input as { command?: unknown }).command;
+  return typeof value === "string" ? value.trim() : "";
+}
+
 export interface ModeSelectOption {
   name: string;
   description?: string;
@@ -308,9 +315,16 @@ export class Mode implements ModeStatusReader {
       }
 
       const suggestions = decision.suggestedModes.join(", ");
+      const command = typeof input === "object" && input !== null
+        ? (input as Record<string, unknown>).command
+        : undefined;
+      const commandPreview = typeof command === "string" ? ` "${command.slice(0, 40)}"` : "";
+
       const labels = [
-        `Allow once — run "${toolName}" this time without switching mode`,
-        `Allow for rest of session — allow "${toolName}" without switching mode`,
+        `Allow once — run "${toolName}" this time`,
+        `Allow once (prefix) — match "${toolName}${commandPreview}" and similar`,
+        `Allow for session — allow "${toolName}" for rest of session`,
+        `Allow for session (prefix) — match "${toolName}${commandPreview}" for rest of session`,
         `Switch mode — change to ${suggestions} (permanent until changed)`,
         "Deny — block this tool call",
       ];
@@ -324,17 +338,28 @@ export class Mode implements ModeStatusReader {
         };
       }
 
+      if (choice.startsWith("Allow once (prefix)")) {
+        const cmd = commandFromInput(input);
+        this.bypass.grantPrefix(toolName, cmd);
+        this.effects.notify(`Allowed "${toolName}" once (prefix: "${cmd.slice(0, 30)}")`, "info");
+        return { block: false, warning: decision.warning };
+      }
       if (choice.startsWith("Allow once")) {
         this.bypass.grant(toolName, input);
         this.effects.notify(`Allowed "${toolName}" once`, "info");
         return { block: false, warning: decision.warning };
       }
-      if (choice.startsWith("Allow for rest of session")) {
+      if (choice.startsWith("Allow for session (prefix)")) {
+        const cmd = commandFromInput(input);
+        this.bypass.grantSessionPrefix(toolName, cmd);
+        this.effects.notify(`Allowed "${toolName}" for session (prefix: "${cmd.slice(0, 30)}")`, "info");
+        return { block: false, warning: decision.warning };
+      }
+      if (choice.startsWith("Allow for session")) {
         this.bypass.grantSession(toolName);
         this.effects.notify(`Allowed "${toolName}" for rest of session`, "info");
         return { block: false, warning: decision.warning };
       }
-
 
       if (choice.startsWith("Switch mode")) {
         const switchResult = this.setMode(decision.suggestedModes[0]);
