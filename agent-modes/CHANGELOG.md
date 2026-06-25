@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.4.0] - 2026-06-26
 
 ### Added
 - **Session-level tool bypass**: When a tool call is blocked by mode policy, users can now choose "Allow for rest of session" to permit the tool for all subsequent calls without switching modes. Unlike "Allow once" which is consumed after one use, session grants persist until the session ends or `clear()` is called.
