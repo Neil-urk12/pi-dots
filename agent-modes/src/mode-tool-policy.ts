@@ -1,4 +1,4 @@
-import type { BashPolicy, ModeDefinition, PermissionAction, BashPatternConfig, ResolvedBashPatterns } from "./types.js";
+import type { BashPolicy, ModeDefinition, PermissionAction, BashPatternConfig, ResolvedBashPatterns, BashPatternSeverity } from "./types.js";
 import { DELEGATION_TOOLS } from "./types.js";
 
 export type ModeCatalogMap = Map<string, { 
@@ -216,6 +216,8 @@ const SAFE_PATTERNS_SOURCE = [
 const BUILTIN_PATTERNS: ResolvedBashPatterns = {
   safe: SAFE_PATTERNS_SOURCE.map(p => new RegExp(p)),
   destructive: DESTRUCTIVE_PATTERNS_SOURCE.map(p => new RegExp(p, "i")),
+  safeSource: [...SAFE_PATTERNS_SOURCE],
+  destructiveSource: [...DESTRUCTIVE_PATTERNS_SOURCE],
 };
 
 function getBuiltinPatterns(): ResolvedBashPatterns {
@@ -245,7 +247,28 @@ export function resolveBashPatterns(
     applyPatternOverrides(destructive, destructiveSource, modeOverrides.destructive);
   }
 
-  return { safe, destructive };
+  // Build severity map from overrides
+  const severity: Map<string, BashPatternSeverity> = new Map();
+
+  function applySeverityOverrides(overrides?: BashPatternConfig) {
+    if (!overrides) return;
+    const sev = overrides.destructive?.severity;
+    if (!sev) return;
+    for (const [pattern, s] of Object.entries(sev)) {
+      severity.set(pattern, s as BashPatternSeverity);
+    }
+  }
+
+  applySeverityOverrides(globalOverrides);
+  applySeverityOverrides(modeOverrides);
+
+  return {
+    safe,
+    destructive,
+    safeSource,
+    destructiveSource,
+    severity: severity.size > 0 ? severity : undefined,
+  };
 }
 
 function applyPatternOverrides(
@@ -280,6 +303,7 @@ function applyPatternOverrides(
         console.warn(`[pi-agent-modes] Skipping bash pattern exceeding ${MAX_BASH_PATTERN_LENGTH} chars`);
         continue;
       }
+
       if (REDOS_PATTERN.test(patternToAdd)) {
         console.warn(`[pi-agent-modes] Skipping bash pattern with nested quantifiers (ReDoS risk): ${patternToAdd}`);
         continue;
@@ -413,6 +437,30 @@ export function evaluateToolCall({
     const bashPolicy = resolveBashPolicy(mode, definition);
     const patterns = bashPatterns ?? getBuiltinPatterns();
 
+    // Check severity overrides first
+    const severityCheck = checkBashSeverity(command, patterns);
+    if (severityCheck) {
+      if (severityCheck.severity === "block") {
+        return {
+          block: true,
+          reason: `${mode.toUpperCase()} mode blocked command: ${command}\nMatched pattern "${severityCheck.matchedPattern}" with severity: block`,
+          suggestedModes,
+        };
+      }
+      if (severityCheck.severity === "ask") {
+        return {
+          block: false,
+          ask: true,
+          askMessage: `⚠️ Risky command in ${mode.toUpperCase()} mode\n\nCommand: ${command}\nMatched: ${severityCheck.matchedPattern} — severity: ask`,
+          suggestedModes,
+        };
+      }
+      if (severityCheck.severity === "allow") {
+        // Explicitly allowed — skip all further bash checks
+        return { block: false, suggestedModes };
+      }
+    }
+
     if (bashPolicy === "strict_readonly" && !isSafeCommand(command, patterns)) {
       return {
         block: true,
@@ -482,4 +530,41 @@ function isDestructiveCommand(command: string, patterns: ResolvedBashPatterns): 
 
 function isSafeCommand(command: string, patterns: ResolvedBashPatterns): boolean {
   return !isDestructiveCommand(command, patterns) && patterns.safe.some((pattern) => pattern.test(command));
+}
+
+/**
+ * Check if a bash command matches any pattern with a severity override.
+ * Returns ask/block result if matched, null if no override applies.
+ */
+function checkBashSeverity(
+  command: string,
+  patterns: ResolvedBashPatterns,
+): { severity: "allow" } | { severity: "ask"; matchedPattern: string } | { severity: "block"; matchedPattern: string } | null {
+  const severityMap = patterns.severity;
+  if (!severityMap || severityMap.size === 0) return null;
+
+  for (const patternSource of patterns.destructiveSource ?? []) {
+    const sev = severityMap.get(patternSource);
+    if (!sev) continue;
+    if (sev === "allow") {
+      // Explicitly allowed — check if matches
+      try {
+        const regex = new RegExp(patternSource, "i");
+        if (regex.test(command)) {
+          return { severity: "allow" };
+        }
+      } catch { /* skip */ }
+      continue;
+    }
+    try {
+      const regex = new RegExp(patternSource, "i");
+      if (regex.test(command)) {
+        return { severity: sev as "ask" | "block", matchedPattern: patternSource };
+      }
+    } catch {
+      // skip invalid patterns (shouldn't happen since we validated on load)
+    }
+  }
+
+  return null;
 }

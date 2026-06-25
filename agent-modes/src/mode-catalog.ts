@@ -1,5 +1,5 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import type { ModeDefinition, PermissionAction, BashPatternConfig, BashPatternOverrides } from "./types.js";
+import type { ModeDefinition, PermissionAction, BashPatternConfig, BashPatternOverrides, BashPatternSeverity } from "./types.js";
 import { USER_CONFIG_DIR, USER_CONFIG_FILE, errorMessage, errorCode } from "./types.js";
 
 export const REQUIRED_BUILT_IN_MODES = ["yolo", "plan", "code", "ask", "orchestrator"] as const;
@@ -97,7 +97,7 @@ function diagnostic(level: DiagnosticLevel, message: string, extras: Partial<Mod
 const VALID_MODE_NAME = /^[a-z0-9_-]+$/;
 const VALID_PERMISSION_ACTIONS: PermissionAction[] = ["allow", "ask", "deny"];
 
-function validateBashPatternConfig(patterns: unknown, context: string): BashPatternConfig | undefined {
+export function validateBashPatternConfig(patterns: unknown, context: string): BashPatternConfig | undefined {
   if (!patterns || typeof patterns !== "object") return undefined;
   const input = patterns as Record<string, unknown>;
   const result: BashPatternConfig = {};
@@ -123,6 +123,30 @@ function validateBashPatternConfig(patterns: unknown, context: string): BashPatt
           throw new Error(`${context}.${key}.remove must be an array of strings`);
         }
         validated.remove = overrideObj.remove as string[];
+      }
+
+      // Validate severity overrides
+      if ("severity" in overrideObj) {
+        const severityObj = overrideObj.severity as Record<string, unknown>;
+        if (!severityObj || typeof severityObj !== "object" || Array.isArray(severityObj)) {
+          throw new Error(`${context}.${key}.severity must be an object`);
+        }
+        const validatedSeverity: Record<string, BashPatternSeverity> = {};
+        for (const [pattern, sev] of Object.entries(severityObj)) {
+          if (sev !== "allow" && sev !== "ask" && sev !== "block") {
+            throw new Error(`${context}.${key}.severity["${pattern}"] must be "allow", "ask", or "block"`);
+          }
+          if (pattern.length > 200) {
+            throw new Error(`${context}.${key}.severity["${pattern}"] exceeds 200 chars`);
+          }
+          try {
+            new RegExp(pattern);
+          } catch {
+            throw new Error(`${context}.${key}.severity["${pattern}"] is not a valid regex`);
+          }
+          validatedSeverity[pattern] = sev as BashPatternSeverity;
+        }
+        validated.severity = validatedSeverity;
       }
       
       result[key] = validated;

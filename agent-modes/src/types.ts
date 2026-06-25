@@ -6,8 +6,11 @@ export type PermissionAction = "allow" | "ask" | "deny";
 /** Overrides for bash command patterns */
 export interface BashPatternOverrides {
   add?: string[];     // regex patterns to add
-  remove?: string[];  // regex patterns to remove (matched by string equality against built-in source)
+  remove?: string[];   // regex patterns to remove (matched by string equality against built-in source)
+  severity?: Record<string, BashPatternSeverity>;
 }
+
+export type BashPatternSeverity = "allow" | "ask" | "block";
 
 /** Configuration for bash command patterns */
 export interface BashPatternConfig {
@@ -19,6 +22,9 @@ export interface BashPatternConfig {
 export interface ResolvedBashPatterns {
   safe: RegExp[];
   destructive: RegExp[];
+  safeSource?: string[];
+  destructiveSource?: string[];
+  severity?: Map<string, BashPatternSeverity>;
 }
 
 export interface ModeDefinition {

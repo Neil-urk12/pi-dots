@@ -1055,3 +1055,81 @@ test("validateBashPattern accepts alternation-based ReDoS patterns (known limita
   const result = validateBashPattern("(a|aa)+");
   expect(result.valid).toBe(true);
 });
+
+test("severity:allow passes through in non_destructive mode", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { severity: { "\\brm\\b": "allow" } },
+  });
+  const result = evaluateToolCall({
+    mode: "code",
+    definition: { mode: "code", bash_policy: "non_destructive" },
+    toolName: "bash",
+    input: { command: "rm -rf node_modules" },
+    bashPatterns: patterns,
+  });
+  expect(result.block).toBe(false);
+  expect(result.ask).toBeUndefined();
+});
+
+test("severity:ask prompts user via decision.ask", () => {
+  // Use the exact source string from DESTRUCTIVE_PATTERNS_SOURCE
+  const gitPattern = "\\bgit\\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)";
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { severity: { [gitPattern]: "ask" } },
+  });
+  const result = evaluateToolCall({
+    mode: "code",
+    definition: { mode: "code", bash_policy: "non_destructive" },
+    toolName: "bash",
+    input: { command: "git push origin main" },
+    bashPatterns: patterns,
+  });
+  expect(result.ask).toBe(true);
+  expect(result.askMessage).toContain("git push");
+  expect(result.block).toBe(false);
+});
+
+test("severity:block blocks even in yolo (off policy)", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { severity: { "\\brm\\b": "block" } },
+  });
+  const result = evaluateToolCall({
+    mode: "yolo",
+    definition: { mode: "yolo", bash_policy: "off" },
+    toolName: "bash",
+    input: { command: "rm -rf /" },
+    bashPatterns: patterns,
+  });
+  expect(result.block).toBe(true);
+});
+
+test("unmatched severity falls through to bash_policy", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { severity: { "\\bsudo\\b": "ask" } },
+  });
+  // rm isn\'t overridden, so non_destructive should block it
+  const result = evaluateToolCall({
+    mode: "code",
+    definition: { mode: "code", bash_policy: "non_destructive" },
+    toolName: "bash",
+    input: { command: "rm -rf node_modules" },
+    bashPatterns: patterns,
+  });
+  expect(result.block).toBe(true);
+  expect(result.reason).toContain("destructive");
+});
+
+test("safe commands not affected by destructive severity overrides", () => {
+  const patterns = resolveBashPatterns(undefined, {
+    destructive: { severity: { "^\\s*cat\\b": "block" } },
+  });
+  // cat is in safe patterns, so safe match takes priority
+  const result = evaluateToolCall({
+    mode: "code",
+    definition: { mode: "code", bash_policy: "non_destructive" },
+    toolName: "bash",
+    input: { command: "cat file.txt" },
+    bashPatterns: patterns,
+  });
+  expect(result.block).toBe(false);
+});

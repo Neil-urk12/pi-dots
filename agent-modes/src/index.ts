@@ -37,6 +37,34 @@ export default async function (pi: ExtensionAPI) {
     });
   }
 
+  pi.registerCommand("patterns", {
+    description: "Show active bash patterns and their effective severities",
+    handler: async (args, ctx) => {
+      const targetMode = args?.trim().toLowerCase() || mode.currentMode();
+      const def = mode.definition(targetMode);
+      if (!def) {
+        ctx.ui.notify(`Unknown mode: ${targetMode}`, "error");
+        return;
+      }
+      const globalPatterns = mode.globalBashPatterns();
+      const modePatterns = def.bash_patterns;
+      const { renderPatternsDialog } = await import("./mode-patterns.js");
+      const { resolveBashPatterns } = await import("./mode-tool-policy.js");
+      const resolved = resolveBashPatterns(globalPatterns, modePatterns);
+      const options = renderPatternsDialog({
+        mode: targetMode,
+        definition: def,
+        bashPatterns: resolved,
+        globalBashPatterns: globalPatterns,
+      });
+      if (options.length === 0) {
+        ctx.ui.notify(`No bash patterns for mode: ${targetMode}`, "warning");
+        return;
+      }
+      await ctx.ui.select("Bash patterns", options);
+    },
+  });
+
   pi.registerCommand("mode", {
     description: "Switch tool mode (yolo, plan, code, ask, orchestrator)",
     handler: async (args, ctx) => handleModeCommand(args, ctx),

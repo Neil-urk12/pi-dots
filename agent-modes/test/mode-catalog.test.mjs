@@ -1,7 +1,8 @@
-import { test, expect } from "vitest";
+import { test, expect, describe, it } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { validateBashPatternConfig } from "../src/mode-catalog.js";
 import { buildModeCatalog, loadAllModes } from "../dist/index.js";
 
 const requiredModes = ["yolo", "plan", "code", "ask", "orchestrator"];
@@ -323,6 +324,7 @@ test("ModeCatalog.resolveMode resolves requested, fallbacks, first available, or
   const catalog = result.catalog;
 
   // 1. Valid requested
+
   expect(catalog.resolveMode("plan")).toBe("plan");
   expect(catalog.resolveMode("  CODE ")).toBe("code");
 
@@ -333,4 +335,130 @@ test("ModeCatalog.resolveMode resolves requested, fallbacks, first available, or
   // 3. None match, returns first available (which is the first key in the map)
   const firstKey = [...catalog.definitions.keys()][0];
   expect(catalog.resolveMode("invalid", ["nonexistent"])).toBe(firstKey);
+});
+
+describe("validateBashPatternConfig with severity", () => {
+  it("accepts valid severity overrides", () => {
+    const config = {
+      destructive: {
+        severity: {
+          "\\bsudo\\b": "ask",
+          "\\bgit\\s+push\\b": "allow",
+          "\\bnpm\\s+install\\b": "block",
+        },
+      },
+    };
+    const result = validateBashPatternConfig(config, "test");
+    expect(result).toBeDefined();
+    expect(result.destructive?.severity?.["\\bsudo\\b"]).toBe("ask");
+  });
+
+  it("rejects invalid severity value", () => {
+    const config = {
+      destructive: {
+        severity: {
+          "\\bsudo\\b": "maybe",
+        },
+      },
+    };
+    expect(() => validateBashPatternConfig(config, "test")).toThrow();
+  });
+
+  it("rejects invalid regex pattern keys", () => {
+    const config = {
+      destructive: {
+        severity: {
+          "[invalid": "block",
+        },
+      },
+    };
+    expect(() => validateBashPatternConfig(config, "test")).toThrow();
+  });
+});
+
+function allModeDocuments() {
+  return [
+    { mode: "yolo", file: "modes/yolo.md", parsed: { mode: "yolo", bash_policy: "off" } },
+    { mode: "plan", file: "modes/plan.md", parsed: { mode: "plan", bash_policy: "strict_readonly" } },
+    { mode: "code", file: "modes/code.md", parsed: { mode: "code", bash_policy: "non_destructive" } },
+    { mode: "ask", file: "modes/ask.md", parsed: { mode: "ask", bash_policy: "strict_readonly" } },
+    { mode: "orchestrator", file: "modes/orchestrator.md", parsed: { mode: "orchestrator", bash_policy: "strict_readonly" } },
+  ];
+}
+
+describe("buildModeCatalog with severity overrides", () => {
+  it("merges global bash_patterns.severity", () => {
+    const userOverrides = {
+      file: "/tmp/config.yaml",
+      parsed: {
+        bash_patterns: {
+          destructive: {
+            severity: { "\\bsudo\\b": "ask" },
+          },
+        },
+      },
+    };
+    const result = buildModeCatalog({
+      modeDocuments: allModeDocuments(),
+      userOverrides,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.catalog.globalBashPatterns?.destructive?.severity?.["\\bsudo\\b"]).toBe("ask");
+    }
+  });
+
+  it("merges per-mode bash_patterns.severity", () => {
+    const userOverrides = {
+      file: "/tmp/config.yaml",
+      parsed: {
+        code: {
+          bash_patterns: {
+            destructive: {
+              severity: { "\\bgit\\s+push\\b": "allow" },
+            },
+          },
+        },
+      },
+    };
+    const result = buildModeCatalog({
+      modeDocuments: allModeDocuments(),
+      userOverrides,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const def = result.catalog.getDefinition("code");
+      expect(def?.bash_patterns?.destructive?.severity?.["\\bgit\\s+push\\b"]).toBe("allow");
+    }
+  });
+
+  it("per-mode severity beats global severity", () => {
+    const userOverrides = {
+      file: "/tmp/config.yaml",
+      parsed: {
+        bash_patterns: {
+          destructive: {
+            severity: { "\\bsudo\\b": "ask" },
+          },
+        },
+        code: {
+          bash_patterns: {
+            destructive: {
+              severity: { "\\bsudo\\b": "block" },
+            },
+          },
+        },
+      },
+    };
+    const result = buildModeCatalog({
+      modeDocuments: allModeDocuments(),
+      userOverrides,
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      const def = result.catalog.getDefinition("code");
+      // Per-mode block should win over global ask
+      expect(def?.bash_patterns?.destructive?.severity?.["\\bsudo\\b"]).toBe("block");
+    }
+  });
 });
