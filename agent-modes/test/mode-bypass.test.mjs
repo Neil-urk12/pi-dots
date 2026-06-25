@@ -64,4 +64,32 @@ describe("OneShotBypass", () => {
     expect(bypass.checkAndConsume("tool", { id: 1 })).toBe(false);
     expect(bypass.checkAndConsume("tool", { id: 2 })).toBe(false);
   });
+
+  it("should grant session-level bypass that allows tool for all calls", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSession("bash");
+
+    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
+    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
+    expect(bypass.checkAndConsume("bash", { command: "git status" })).toBe(true);
+    expect(bypass.checkAndConsume("write", { path: "test.ts" })).toBe(false);
+  });
+
+  it("should not consume session grants — they persist until clear", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSession("bash");
+
+    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
+    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
+    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
+  });
+
+  it("should clear session grants when clear is called", () => {
+    const bypass = new OneShotBypass();
+    bypass.grantSession("bash");
+    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(true);
+
+    bypass.clear();
+    expect(bypass.checkAndConsume("bash", { command: "ls" })).toBe(false);
+  });
 });

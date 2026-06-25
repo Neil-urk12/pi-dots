@@ -2,14 +2,14 @@ function makeBypassKey(toolName: string, input: unknown): string {
   let args = "";
   if (input && typeof input === "object") {
     try {
-      args = JSON.stringify(input, (_key, value) => {
-        if (value && typeof value === "object" && !Array.isArray(value)) {
-          return Object.keys(value).sort().reduce<Record<string, unknown>>((sorted, k) => {
-            sorted[k] = (value as Record<string, unknown>)[k];
+      args = JSON.stringify(input, (_key, val) => {
+        if (val && typeof val === "object" && !Array.isArray(val)) {
+          return Object.keys(val).sort().reduce<Record<string, unknown>>((sorted, k) => {
+            sorted[k] = (val as Record<string, unknown>)[k];
             return sorted;
           }, {});
         }
-        return value;
+        return val;
       });
     } catch {
       args = "<unserializable>";
@@ -22,6 +22,7 @@ const DEFAULT_MAX_SIZE = 100;
 
 export class OneShotBypass {
   private readonly bypasses = new Set<string>();
+  private readonly sessionGrants = new Set<string>();
   private readonly maxSize: number;
 
   constructor({ maxSize = DEFAULT_MAX_SIZE }: { maxSize?: number } = {}) {
@@ -29,6 +30,10 @@ export class OneShotBypass {
   }
 
   checkAndConsume(toolName: string, input: unknown): boolean {
+    // Session grants allow tool for all calls (not consumed)
+    if (this.sessionGrants.has(toolName)) {
+      return true;
+    }
     const key = makeBypassKey(toolName, input);
     if (this.bypasses.has(key)) {
       this.bypasses.delete(key);
@@ -45,7 +50,12 @@ export class OneShotBypass {
     this.bypasses.add(makeBypassKey(toolName, input));
   }
 
+  grantSession(toolName: string): void {
+    this.sessionGrants.add(toolName);
+  }
+
   clear(): void {
     this.bypasses.clear();
+    this.sessionGrants.clear();
   }
 }

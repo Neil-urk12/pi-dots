@@ -310,6 +310,7 @@ export class Mode implements ModeStatusReader {
       const suggestions = decision.suggestedModes.join(", ");
       const labels = [
         `Allow once — run "${toolName}" this time without switching mode`,
+        `Allow for rest of session — allow "${toolName}" without switching mode`,
         `Switch mode — change to ${suggestions} (permanent until changed)`,
         "Deny — block this tool call",
       ];
@@ -328,6 +329,12 @@ export class Mode implements ModeStatusReader {
         this.effects.notify(`Allowed "${toolName}" once`, "info");
         return { block: false, warning: decision.warning };
       }
+      if (choice.startsWith("Allow for rest of session")) {
+        this.bypass.grantSession(toolName);
+        this.effects.notify(`Allowed "${toolName}" for rest of session`, "info");
+        return { block: false, warning: decision.warning };
+      }
+
 
       if (choice.startsWith("Switch mode")) {
         const switchResult = this.setMode(decision.suggestedModes[0]);
