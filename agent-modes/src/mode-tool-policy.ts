@@ -25,8 +25,12 @@ export interface ModeToolPolicyInput {
   catalog?: ModeCatalogMap;
   /** Known available agent names from the subagent system. Used to validate allowed_agents. */
   availableAgents?: string[];
-  /** Resolved bash patterns for this mode. */
+  /** Pre-resolved bash patterns. If omitted, engine resolves from raw configs below. */
   bashPatterns?: ResolvedBashPatterns;
+  /** Global bash pattern config (from user config). Used when bashPatterns is omitted. */
+  globalBashPatterns?: BashPatternConfig;
+  /** Mode-specific bash pattern config. Used when bashPatterns is omitted. */
+  modeBashPatterns?: BashPatternConfig;
 }
 
 export interface ModeToolPolicyDecision {
@@ -40,13 +44,13 @@ export interface ModeToolPolicyDecision {
 
 /**
  * Given a tool name (and optional bash command), return which modes from the catalog
- * would allow that tool call.
+ * would allow that tool call. Delegates bash policy decisions to evaluateToolCall.
  */
 export function findModesForTool(
   toolName: string,
   definitions: ModeCatalogMap,
   input?: unknown,
-  bashPatterns?: ResolvedBashPatterns,
+  globalBashPatterns?: BashPatternConfig,
 ): string[] {
   const result: string[] = [];
 
@@ -78,18 +82,20 @@ export function findModesForTool(
       }
     }
 
-    // For bash, also check bash_policy
+    // For bash, delegate to evaluateToolCall for policy decision
     if (toolName === "bash") {
-      const command = commandFromInput(input);
-      const policy = def.bash_policy;
-      const resolvedPolicy = policy ?? resolveDefaultBashPolicy(mode);
-
-      if (resolvedPolicy === "strict_readonly" && !isSafeCommand(command, bashPatterns ?? getBuiltinPatterns())) {
-        continue; // bash command not allowed in strict_readonly
-      }
-      if (resolvedPolicy === "non_destructive" && isDestructiveCommand(command, bashPatterns ?? getBuiltinPatterns())) {
-        continue; // destructive bash not allowed in non_destructive
-      }
+      const bashPatterns = resolveBashPatterns(globalBashPatterns, def.bash_patterns);
+      // IMPORTANT: Do NOT pass `catalog` here. evaluateToolCall line 356 calls
+      // findModesForTool internally — passing catalog would create infinite
+      // recursion (findModesForTool → evaluateToolCall → findModesForTool → …).
+      const decision = evaluateToolCall({
+        mode,
+        definition: def as unknown as ModeDefinition,
+        toolName,
+        input,
+        bashPatterns,
+      });
+      if (decision.block) continue;
     }
 
     result.push(mode);
@@ -343,9 +349,22 @@ export function evaluateToolCall({
   input, 
   catalog, 
   availableAgents,
-  bashPatterns 
+  bashPatterns,
+  globalBashPatterns,
+  modeBashPatterns,
 }: ModeToolPolicyInput): ModeToolPolicyDecision {
-  const suggestedModes = catalog ? findModesForTool(toolName, catalog, input, bashPatterns) : undefined;
+  // NOTE: This creates a call cycle: findModesForTool → evaluateToolCall → findModesForTool.
+  // Safe because findModesForTool's internal evaluateToolCall call (line ~88) omits `catalog`,
+  // making this a no-op in that path. If a future refactor passes `catalog` in that call,
+  // this becomes infinite recursion.
+  //
+  // Each mode re-resolves bash patterns from scratch inside findModesForTool (resolveBashPatterns
+  // per mode). O(n) redundant for small catalogs — if catalog grows, pre-resolve the global base
+  // and pass it through to avoid rebuilding from builtins every time.
+  const suggestedModes = catalog ? findModesForTool(toolName, catalog, input, globalBashPatterns) : undefined;
+
+  // Resolve patterns: pre-resolved takes precedence, otherwise resolve from raw configs
+  const resolvedPatterns = bashPatterns ?? resolveBashPatterns(globalBashPatterns, modeBashPatterns);
   
   // Check explicit permissions first
   const action = definition?.permissions?.[toolName];
@@ -389,7 +408,7 @@ export function evaluateToolCall({
 
     if (toolName === "bash") {
       const command = commandFromInput(input);
-      const patterns = bashPatterns ?? getBuiltinPatterns();
+      const patterns = resolvedPatterns;
       if (!isSafeCommand(command, patterns)) {
         return {
           block: true,
@@ -442,7 +461,7 @@ export function evaluateToolCall({
   if (toolName === "bash") {
     const command = commandFromInput(input);
     const bashPolicy = resolveBashPolicy(mode, definition);
-    const patterns = bashPatterns ?? getBuiltinPatterns();
+    const patterns = resolvedPatterns;
 
     // Check severity overrides first
     const severityCheck = checkBashSeverity(command, patterns);

@@ -935,7 +935,7 @@ test("resolveBashPatterns logs warning for invalid regex in destructive.add", ()
 
 // --- findModesForTool bashPatterns consistency (TDD red) ---
 
-test("findModesForTool respects custom bashPatterns for strict_readonly", () => {
+test("findModesForTool respects custom globalBashPatterns for strict_readonly", () => {
   const catalog = new Map([
     ["plan", { bash_policy: "strict_readonly" }],
     ["code", { bash_policy: "non_destructive" }],
@@ -943,17 +943,17 @@ test("findModesForTool respects custom bashPatterns for strict_readonly", () => 
 
   // "npm test" is NOT in built-in safe patterns, so plan would reject it.
   // Add it as custom safe pattern — findModesForTool should now include plan.
-  const patterns = resolveBashPatterns(undefined, {
+  const globalBashPatterns = {
     safe: { add: ["(?:^|[;&|]{1,2})\\s*npm\\s+test\\b"] }
-  });
+  };
 
-  const result = findModesForTool("bash", catalog, { command: "npm test" }, patterns);
+  const result = findModesForTool("bash", catalog, { command: "npm test" }, globalBashPatterns);
 
   expect(result).toContain("plan");
   expect(result).toContain("code");
 });
 
-test("findModesForTool respects custom bashPatterns for non_destructive", () => {
+test("findModesForTool respects custom globalBashPatterns for non_destructive", () => {
   const catalog = new Map([
     ["plan", { bash_policy: "strict_readonly" }],
     ["code", { bash_policy: "non_destructive" }],
@@ -961,11 +961,11 @@ test("findModesForTool respects custom bashPatterns for non_destructive", () => 
 
   // "custom_deploy" is not in built-in destructive patterns, so code would allow it.
   // Add it as custom destructive pattern — findModesForTool should now exclude code.
-  const patterns = resolveBashPatterns(undefined, {
+  const globalBashPatterns = {
     destructive: { add: ["(?:^|[;&|]{1,2})\\s*custom_deploy\\b"] }
-  });
+  };
 
-  const result = findModesForTool("bash", catalog, { command: "custom_deploy --prod" }, patterns);
+  const result = findModesForTool("bash", catalog, { command: "custom_deploy --prod" }, globalBashPatterns);
 
   expect(result).not.toContain("code");
   expect(result).not.toContain("plan"); // rm-like not safe either

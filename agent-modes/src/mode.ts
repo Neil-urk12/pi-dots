@@ -3,7 +3,7 @@ import { CustomEditor } from "@earendil-works/pi-coding-agent";
 
 import { loadAllModes, notifyModeCatalogDiagnostics, ModeCatalog } from "./mode-catalog.js";
 import { injectIntoPayload } from "./payload-injection.js";
-import { evaluateToolCall, resolveBashPatterns } from "./mode-tool-policy.js";
+import { evaluateToolCall } from "./mode-tool-policy.js";
 import { ModeFileWatcher } from "./mode-file-watcher.js";
 import type { ModeDefinition, BashPatternConfig } from "./types.js";
 import { PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE, DEFAULT_MODE, SAFE_FALLBACK_MODES, DELEGATION_TOOLS } from "./types.js";
@@ -270,8 +270,6 @@ export class Mode implements ModeStatusReader {
 
     const globalBashPatterns = this.globalBashPatterns();
     const modeBashPatterns = definition?.bash_patterns;
-    const bashPatterns = resolveBashPatterns(globalBashPatterns, modeBashPatterns);
-
     const decision = evaluateToolCall({
       mode,
       definition,
@@ -279,7 +277,8 @@ export class Mode implements ModeStatusReader {
       input,
       catalog: catalogDefs,
       availableAgents,
-      bashPatterns,
+      globalBashPatterns,
+      modeBashPatterns,
     });
 
     if (decision.ask) {
