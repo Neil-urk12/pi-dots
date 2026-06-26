@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.2] - 2026-06-26
+
+### Added
+- **Bash pattern engine** (`bash-pattern-engine.ts`): New self-contained module owning pattern definitions, resolution, matching, severity overrides, and validation. Zero dependencies on mode catalogs or delegation logic.
+- **`isBashCommandAllowed()`**: Public API to evaluate a bash command against a mode's policy. Returns whether the command passes the effective bash policy for the mode.
+
+### Changed
+- **`findModesForTool` no longer calls `evaluateToolCall`**: Bash policy checks now go through the pattern engine directly, eliminating the documented mutual recursion between `findModesForTool` and `evaluateToolCall`.
+- **`mode-tool-policy.ts` slimmed** (590 → 316 lines): Imports bash functions from the engine; retains only policy orchestration, tool delegation, and catalog logic.
+
+### Refactored
+- Extracted bash pattern engine from `mode-tool-policy.ts` into dedicated module
+- Merged `resolveDefaultBashPolicy()` into the engine's `resolveBashPolicy()`
+
 ## [0.4.1] - 2026-06-26
 
 ### Changed

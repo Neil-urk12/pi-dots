@@ -9,6 +9,7 @@ export { Mode, type ModeEffects, type ModeDialogs, type ModeStatusReader, type M
 export { buildModeCatalog, loadAllModes } from "./mode-catalog.js";
 export { ModeFileWatcher } from "./mode-file-watcher.js";
 export { evaluateToolCall, findModesForTool, resolveBashPatterns, validateBashPattern } from "./mode-tool-policy.js";
+export { isBashCommandAllowed, resolveBashPolicy } from "./bash-pattern-engine.js";
 export { injectIntoPayload } from "./payload-injection.js";
 export { DEFAULT_MODE, SAFE_FALLBACK_MODES, PICKER_FALLBACK_MODE, MAX_MODE_NAME_LENGTH, SUFFIX_PREVIEW_LENGTH, USER_CONFIG_DIR, USER_CONFIG_FILE, errorMessage, errorCode } from "./types.js";
 import { ModeFileWatcher } from "./mode-file-watcher.js";

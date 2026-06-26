@@ -1,6 +1,6 @@
 {
   "name": "@neilurk12/pi-agent-modes",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Multi-mode extension for pi coding agent: yolo, plan, ask, orchestrator",
   "type": "module",
   "keywords": [
