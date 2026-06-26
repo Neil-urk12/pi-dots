@@ -737,7 +737,7 @@ test("resolveBashPatterns returns built-in patterns by default", () => {
 
 test("resolveBashPatterns adds custom safe pattern", () => {
   const patterns = resolveBashPatterns(undefined, {
-    safe: { add: ["^\\s*my_tool\\b"] }
+    safe: { add: ["(?:^|[;&|]{1,2})\\s*my_tool\\b"] }
   });
 
   expect(patterns.safe.some(p => p.test("my_tool --help"))).toBe(true);
@@ -746,7 +746,7 @@ test("resolveBashPatterns adds custom safe pattern", () => {
 
 test("resolveBashPatterns adds custom destructive pattern", () => {
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { add: ["^\\s*dangerous\\b"] }
+    destructive: { add: ["(?:^|[;&|]{1,2})\\s*dangerous\\b"] }
   });
 
   expect(patterns.destructive.some(p => p.test("dangerous --all"))).toBe(true);
@@ -755,7 +755,7 @@ test("resolveBashPatterns adds custom destructive pattern", () => {
 
 test("resolveBashPatterns removes built-in safe pattern", () => {
   const patterns = resolveBashPatterns(undefined, {
-    safe: { remove: ["^\\s*curl\\b"] }
+    safe: { remove: ["(?:^|[;&|]{1,2})\\s*curl\\b"] }
   });
 
   expect(patterns.safe.some(p => p.test("curl https://example.com"))).toBe(false);
@@ -764,7 +764,7 @@ test("resolveBashPatterns removes built-in safe pattern", () => {
 
 test("resolveBashPatterns removes built-in destructive pattern", () => {
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { remove: ["\\bsudo\\b"] }
+    destructive: { remove: ["(?:^|[;&|]{1,2})\\s*sudo\\b"] }
   });
 
   expect(patterns.destructive.some(p => p.test("sudo"))).toBe(false);
@@ -773,8 +773,8 @@ test("resolveBashPatterns removes built-in destructive pattern", () => {
 
 test("resolveBashPatterns merges global and mode overrides", () => {
   const patterns = resolveBashPatterns(
-    { safe: { add: ["^\\s*global_tool\\b"] } },
-    { safe: { add: ["^\\s*mode_tool\\b"] } }
+    { safe: { add: ["(?:^|[;&|]{1,2})\\s*global_tool\\b"] } },
+    { safe: { add: ["(?:^|[;&|]{1,2})\\s*mode_tool\\b"] } }
   );
 
   expect(patterns.safe.some(p => p.test("global_tool --help"))).toBe(true);
@@ -784,8 +784,8 @@ test("resolveBashPatterns merges global and mode overrides", () => {
 
 test("resolveBashPatterns mode overrides take precedence over global", () => {
   const patterns = resolveBashPatterns(
-    { destructive: { remove: ["\\bsudo\\b"] } },
-    { destructive: { add: ["\\bsudo\\b"] } }
+    { destructive: { remove: ["(?:^|[;&|]{1,2})\\s*sudo\\b"] } },
+    { destructive: { add: ["(?:^|[;&|]{1,2})\\s*sudo\\b"] } }
   );
 
   expect(patterns.destructive.some(p => p.test("sudo apt update"))).toBe(true);
@@ -801,7 +801,7 @@ test("resolveBashPatterns handles invalid regex gracefully", () => {
 });
 
 test("validateBashPattern returns valid for correct regex", () => {
-  const result = validateBashPattern("^\\s*test\\b");
+  const result = validateBashPattern("(?:^|[;&|]{1,2})\\s*test\\b");
   expect(result.valid).toBe(true);
   expect(result.error).toBeUndefined();
 });
@@ -814,7 +814,7 @@ test("validateBashPattern returns error for invalid regex", () => {
 
 test("custom safe pattern passes strict_readonly policy", () => {
   const patterns = resolveBashPatterns(undefined, {
-    safe: { add: ["^\\s*npm\\s+test\\b"] }
+    safe: { add: ["(?:^|[;&|]{1,2})\\s*npm\\s+test\\b"] }
   });
 
   const result = decision({
@@ -830,7 +830,7 @@ test("custom safe pattern passes strict_readonly policy", () => {
 
 test("custom destructive pattern blocks non_destructive policy", () => {
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { add: ["^\\s*dangerous\\b"] }
+    destructive: { add: ["(?:^|[;&|]{1,2})\\s*dangerous\\b"] }
   });
 
   const result = decision({
@@ -847,7 +847,7 @@ test("custom destructive pattern blocks non_destructive policy", () => {
 
 test("remove built-in safe pattern blocks command in strict_readonly", () => {
   const patterns = resolveBashPatterns(undefined, {
-    safe: { remove: ["^\\s*cat\\b"] }
+    safe: { remove: ["(?:^|[;&|]{1,2})\\s*cat\\b"] }
   });
 
   const result = decision({
@@ -864,7 +864,7 @@ test("remove built-in safe pattern blocks command in strict_readonly", () => {
 
 test("remove built-in destructive pattern allows command in non_destructive", () => {
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { remove: ["\\brm\\b"] }
+    destructive: { remove: ["(?:^|[;&|]{1,2})\\s*rm\\b"] }
   });
 
   const result = decision({
@@ -880,8 +880,8 @@ test("remove built-in destructive pattern allows command in non_destructive", ()
 
 test("global overrides applied before mode overrides", () => {
   const patterns = resolveBashPatterns(
-    { safe: { add: ["^\\s*global_tool\\b"] } },
-    { safe: { add: ["^\\s*mode_tool\\b"] } }
+    { safe: { add: ["(?:^|[;&|]{1,2})\\s*global_tool\\b"] } },
+    { safe: { add: ["(?:^|[;&|]{1,2})\\s*mode_tool\\b"] } }
   );
 
   const result = decision({
@@ -897,8 +897,8 @@ test("global overrides applied before mode overrides", () => {
 
 test("mode overrides can remove patterns added by global", () => {
   const patterns = resolveBashPatterns(
-    { safe: { add: ["^\\s*global_tool\\b"] } },
-    { safe: { remove: ["^\\s*global_tool\\b"] } }
+    { safe: { add: ["(?:^|[;&|]{1,2})\\s*global_tool\\b"] } },
+    { safe: { remove: ["(?:^|[;&|]{1,2})\\s*global_tool\\b"] } }
   );
 
   const result = decision({
@@ -944,7 +944,7 @@ test("findModesForTool respects custom bashPatterns for strict_readonly", () => 
   // "npm test" is NOT in built-in safe patterns, so plan would reject it.
   // Add it as custom safe pattern — findModesForTool should now include plan.
   const patterns = resolveBashPatterns(undefined, {
-    safe: { add: ["^\\s*npm\\s+test\\b"] }
+    safe: { add: ["(?:^|[;&|]{1,2})\\s*npm\\s+test\\b"] }
   });
 
   const result = findModesForTool("bash", catalog, { command: "npm test" }, patterns);
@@ -962,7 +962,7 @@ test("findModesForTool respects custom bashPatterns for non_destructive", () => 
   // "custom_deploy" is not in built-in destructive patterns, so code would allow it.
   // Add it as custom destructive pattern — findModesForTool should now exclude code.
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { add: ["^\\s*custom_deploy\\b"] }
+    destructive: { add: ["(?:^|[;&|]{1,2})\\s*custom_deploy\\b"] }
   });
 
   const result = findModesForTool("bash", catalog, { command: "custom_deploy --prod" }, patterns);
@@ -1018,7 +1018,7 @@ test("resolveBashPatterns rejects (a*)* nested quantifier", () => {
 test("resolveBashPatterns allows safe patterns with quantifiers (no nesting)", () => {
   // Quantifier outside group — not nested, should be fine
   const patterns = resolveBashPatterns(undefined, {
-    safe: { add: ["^\\s*foo\\s+bar.*"] }
+    safe: { add: ["(?:^|[;&|]{1,2})\\s*foo\\s+bar.*"] }
   });
 
   expect(patterns.safe.some(p => p.test("foo bar baz"))).toBe(true);
@@ -1058,7 +1058,7 @@ test("validateBashPattern accepts alternation-based ReDoS patterns (known limita
 
 test("severity:allow passes through in non_destructive mode", () => {
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { severity: { "\\brm\\b": "allow" } },
+    destructive: { severity: { "(?:^|[;&|]{1,2})\\s*rm\\b": "allow" } },
   });
   const result = evaluateToolCall({
     mode: "code",
@@ -1073,7 +1073,7 @@ test("severity:allow passes through in non_destructive mode", () => {
 
 test("severity:ask prompts user via decision.ask", () => {
   // Use the exact source string from DESTRUCTIVE_PATTERNS_SOURCE
-  const gitPattern = "\\bgit\\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)";
+  const gitPattern = "(?:^|[;&|]{1,2})\\s*git\\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)";
   const patterns = resolveBashPatterns(undefined, {
     destructive: { severity: { [gitPattern]: "ask" } },
   });
@@ -1091,7 +1091,7 @@ test("severity:ask prompts user via decision.ask", () => {
 
 test("severity:block blocks even in yolo (off policy)", () => {
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { severity: { "\\brm\\b": "block" } },
+    destructive: { severity: { "(?:^|[;&|]{1,2})\\s*rm\\b": "block" } },
   });
   const result = evaluateToolCall({
     mode: "yolo",
@@ -1105,7 +1105,7 @@ test("severity:block blocks even in yolo (off policy)", () => {
 
 test("unmatched severity falls through to bash_policy", () => {
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { severity: { "\\bsudo\\b": "ask" } },
+    destructive: { severity: { "(?:^|[;&|]{1,2})\\s*sudo\\b": "ask" } },
   });
   // rm isn\'t overridden, so non_destructive should block it
   const result = evaluateToolCall({
@@ -1121,7 +1121,7 @@ test("unmatched severity falls through to bash_policy", () => {
 
 test("safe commands not affected by destructive severity overrides", () => {
   const patterns = resolveBashPatterns(undefined, {
-    destructive: { severity: { "^\\s*cat\\b": "block" } },
+    destructive: { severity: { "(?:^|[;&|]{1,2})\\s*cat\\b": "block" } },
   });
   // cat is in safe patterns, so safe match takes priority
   const result = evaluateToolCall({

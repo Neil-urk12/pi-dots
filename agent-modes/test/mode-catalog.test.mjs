@@ -342,22 +342,22 @@ describe("validateBashPatternConfig with severity", () => {
     const config = {
       destructive: {
         severity: {
-          "\\bsudo\\b": "ask",
-          "\\bgit\\s+push\\b": "allow",
-          "\\bnpm\\s+install\\b": "block",
+          "(?:^|[;&|]{1,2})\\s*sudo\\b": "ask",
+          "(?:^|[;&|]{1,2})\\s*git\\s+push\\b": "allow",
+          "(?:^|[;&|]{1,2})\\s*npm\\s+install\\b": "block",
         },
       },
     };
     const result = validateBashPatternConfig(config, "test");
     expect(result).toBeDefined();
-    expect(result.destructive?.severity?.["\\bsudo\\b"]).toBe("ask");
+    expect(result.destructive?.severity?.["(?:^|[;&|]{1,2})\\s*sudo\\b"]).toBe("ask");
   });
 
   it("rejects invalid severity value", () => {
     const config = {
       destructive: {
         severity: {
-          "\\bsudo\\b": "maybe",
+          "(?:^|[;&|]{1,2})\\s*sudo\\b": "maybe",
         },
       },
     };
@@ -393,8 +393,7 @@ describe("buildModeCatalog with severity overrides", () => {
       parsed: {
         bash_patterns: {
           destructive: {
-            severity: { "\\bsudo\\b": "ask" },
-          },
+            severity: { "(?:^|[;&|]{1,2})\\s*sudo\\b": "ask" }},
         },
       },
     };
@@ -404,7 +403,7 @@ describe("buildModeCatalog with severity overrides", () => {
     });
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.catalog.globalBashPatterns?.destructive?.severity?.["\\bsudo\\b"]).toBe("ask");
+      expect(result.catalog.globalBashPatterns?.destructive?.severity?.["(?:^|[;&|]{1,2})\\s*sudo\\b"]).toBe("ask");
     }
   });
 
@@ -415,8 +414,7 @@ describe("buildModeCatalog with severity overrides", () => {
         code: {
           bash_patterns: {
             destructive: {
-              severity: { "\\bgit\\s+push\\b": "allow" },
-            },
+              severity: { "(?:^|[;&|]{1,2})\\s*git\\s+push\\b": "allow" }},
           },
         },
       },
@@ -428,7 +426,7 @@ describe("buildModeCatalog with severity overrides", () => {
     expect(result.ok).toBe(true);
     if (result.ok) {
       const def = result.catalog.getDefinition("code");
-      expect(def?.bash_patterns?.destructive?.severity?.["\\bgit\\s+push\\b"]).toBe("allow");
+      expect(def?.bash_patterns?.destructive?.severity?.["(?:^|[;&|]{1,2})\\s*git\\s+push\\b"]).toBe("allow");
     }
   });
 
@@ -438,14 +436,12 @@ describe("buildModeCatalog with severity overrides", () => {
       parsed: {
         bash_patterns: {
           destructive: {
-            severity: { "\\bsudo\\b": "ask" },
-          },
+            severity: { "(?:^|[;&|]{1,2})\\s*sudo\\b": "ask" }},
         },
         code: {
           bash_patterns: {
             destructive: {
-              severity: { "\\bsudo\\b": "block" },
-            },
+              severity: { "(?:^|[;&|]{1,2})\\s*sudo\\b": "block" }},
           },
         },
       },
@@ -458,7 +454,7 @@ describe("buildModeCatalog with severity overrides", () => {
     if (result.ok) {
       const def = result.catalog.getDefinition("code");
       // Per-mode block should win over global ask
-      expect(def?.bash_patterns?.destructive?.severity?.["\\bsudo\\b"]).toBe("block");
+      expect(def?.bash_patterns?.destructive?.severity?.["(?:^|[;&|]{1,2})\\s*sudo\\b"]).toBe("block");
     }
   });
 });
